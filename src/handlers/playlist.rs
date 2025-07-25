@@ -67,7 +67,9 @@ pub fn handler(key: Key, app: &mut App) {
         app.playlist_offset = 0;
         if let Some(selected_playlist) = playlists.items.get(selected_playlist_index.to_owned()) {
           let playlist_id = selected_playlist.id.to_owned();
-          app.dispatch(IoEvent::GetPlaylistTracks(playlist_id, app.playlist_offset));
+          app.dispatch(IoEvent::GetPlaylistTracks(playlist_id.to_string(), app.playlist_offset));
+          // Navigate to the track table view to show the playlist tracks
+          app.push_navigation_stack(RouteId::TrackTable, ActiveBlock::TrackTable);
         }
       };
     }

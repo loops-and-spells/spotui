@@ -2,6 +2,7 @@ use super::{
   super::app::{App, TrackTableContext},
   common_key_events,
 };
+use crate::app::{ActiveBlock, RouteId};
 use crate::event::Key;
 use crate::network::IoEvent;
 
@@ -49,11 +50,13 @@ pub fn handler(key: Key, app: &mut App) {
         app.playlist_offset = 0;
         if let Some(selected_playlist) = playlists.items.get(selected_playlist_index.to_owned()) {
           app.made_for_you_offset = 0;
-          let playlist_id = selected_playlist.id.to_owned();
+          let playlist_id = selected_playlist.id.to_string();
           app.dispatch(IoEvent::GetMadeForYouPlaylistTracks(
             playlist_id,
             app.made_for_you_offset,
           ));
+          // Navigate to the track table view to show the playlist tracks
+          app.push_navigation_stack(RouteId::TrackTable, ActiveBlock::TrackTable);
         }
       };
     }

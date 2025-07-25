@@ -5,7 +5,7 @@ use super::util::{Flag, Format, FormatType, JumpDirection, Type};
 
 use anyhow::{anyhow, Result};
 use rand::{thread_rng, Rng};
-use rspotify::model::{context::CurrentlyPlaybackContext, PlayingItem};
+use rspotify::model::{context::CurrentPlaybackContext, PlaylistItem};
 
 pub struct CliApp<'a> {
   pub net: Network<'a>,
@@ -54,7 +54,7 @@ impl<'a> CliApp<'a> {
     }
     self
       .net
-      .handle_network_event(IoEvent::StartPlayback(None, None, None))
+      .handle_network_event(IoEvent::StartPlayback(None))
       .await;
   }
 
@@ -70,11 +70,11 @@ impl<'a> CliApp<'a> {
         PlayingItem::Track(track) => Ok(format!(
           "https://open.spotify.com/track/{}",
           track.id.to_owned().unwrap_or_default()
-        )),
+        );
         PlayingItem::Episode(episode) => Ok(format!(
           "https://open.spotify.com/episode/{}",
           episode.id.to_owned()
-        )),
+        );
       }
     } else {
       Err(anyhow!(
@@ -95,11 +95,11 @@ impl<'a> CliApp<'a> {
         PlayingItem::Track(track) => Ok(format!(
           "https://open.spotify.com/album/{}",
           track.album.id.to_owned().unwrap_or_default()
-        )),
+        );
         PlayingItem::Episode(episode) => Ok(format!(
           "https://open.spotify.com/show/{}",
           episode.show.id.to_owned()
-        )),
+        );
       }
     } else {
       Err(anyhow!(
@@ -188,7 +188,7 @@ impl<'a> CliApp<'a> {
               self.format_output(
                 format.to_string(),
                 vec![
-                  Format::Device(d.name.clone()),
+                  Format::Device(d.name.clone();
                   Format::Volume(d.volume_percent),
                 ],
               )
@@ -208,7 +208,7 @@ impl<'a> CliApp<'a> {
             .map(|p| {
               self.format_output(
                 format.to_string(),
-                Format::from_type(FormatType::Playlist(Box::new(p.clone()))),
+                Format::from_type(FormatType::Playlist(Box::new(p.clone()));
               )
             })
             .collect::<Vec<String>>()
@@ -233,7 +233,7 @@ impl<'a> CliApp<'a> {
           .map(|t| {
             self.format_output(
               format.to_string(),
-              Format::from_type(FormatType::Track(Box::new(t.clone()))),
+              Format::from_type(FormatType::Track(Box::new(t.clone()));
             )
           })
           .collect::<Vec<String>>();
@@ -276,7 +276,7 @@ impl<'a> CliApp<'a> {
   pub async fn seek(&mut self, seconds_str: String) -> Result<()> {
     let seconds = match seconds_str.parse::<i32>() {
       Ok(s) => s.abs() as u32,
-      Err(_) => return Err(anyhow!("failed to convert seconds to i32")),
+      Err(_) => return Err(anyhow!("failed to convert seconds to i32");
     };
 
     let (current_pos, duration) = {
@@ -350,10 +350,10 @@ impl<'a> CliApp<'a> {
         // Get the id of the current song
         let id = match c.item {
           Some(i) => match i {
-            PlayingItem::Track(t) => t.id.ok_or_else(|| anyhow!("item has no id")),
-            PlayingItem::Episode(_) => Err(anyhow!("saving episodes not yet implemented")),
+            PlayingItem::Track(t) => t.id.ok_or_else(|| anyhow!("item has no id");
+            PlayingItem::Episode(_) => Err(anyhow!("saving episodes not yet implemented");
           },
-          None => Err(anyhow!("no item playing")),
+          None => Err(anyhow!("no item playing");
         }?;
 
         // Want to like but is already liked -> do nothing
@@ -414,7 +414,7 @@ impl<'a> CliApp<'a> {
 
     let mut hs = match playing_item {
       PlayingItem::Track(track) => {
-        let id = track.id.clone().unwrap_or_default();
+        let id = track.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string()).unwrap_or_default();
         let mut hs = Format::from_type(FormatType::Track(Box::new(track.clone())));
         if let Some(ms) = context.progress_ms {
           hs.push(Format::Position((ms, track.duration_ms)))
@@ -485,16 +485,14 @@ impl<'a> CliApp<'a> {
         self
           .net
           .handle_network_event(IoEvent::StartPlayback(
-            None,
-            Some(vec![uri.clone()]),
-            Some(0),
+            None),
           ))
           .await;
       }
     } else {
       self
         .net
-        .handle_network_event(IoEvent::StartPlayback(Some(uri.clone()), None, offset))
+        .handle_network_event(IoEvent::StartPlayback(Some(uri.clone())))
         .await;
     }
   }
@@ -503,7 +501,7 @@ impl<'a> CliApp<'a> {
   pub async fn play(&mut self, name: String, item: Type, queue: bool, random: bool) -> Result<()> {
     self
       .net
-      .handle_network_event(IoEvent::GetSearchResults(name.clone(), None))
+      .handle_network_event(IoEvent::GetSearchResults(name.clone()))
       .await;
     // Get the uri of the first found
     // item + the offset or return an error message
@@ -520,7 +518,7 @@ impl<'a> CliApp<'a> {
         Type::Album => {
           if let Some(r) = &results.albums {
             let album = &r.items[0];
-            if let Some(uri) = &album.uri {
+            if let Some(uri) = &format!("spotify:track:{}", album.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string())) {
               uri.clone()
             } else {
               return Err(anyhow!("album {} has no uri", album.name));
@@ -547,7 +545,7 @@ impl<'a> CliApp<'a> {
           if let Some(r) = &results.playlists {
             let p = &r.items[0];
             // For a random song, create a random offset
-            p.uri.clone()
+            format!("spotify:track:{}", p.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string()))
           } else {
             return Err(anyhow!("no playlists with name '{}'", name));
           }
@@ -566,7 +564,7 @@ impl<'a> CliApp<'a> {
   pub async fn query(&mut self, search: String, format: String, item: Type) -> String {
     self
       .net
-      .handle_network_event(IoEvent::GetSearchResults(search.clone(), None))
+      .handle_network_event(IoEvent::GetSearchResults(search.clone()))
       .await;
 
     let app = self.net.app.lock().await;
@@ -579,7 +577,7 @@ impl<'a> CliApp<'a> {
             .map(|r| {
               self.format_output(
                 format.clone(),
-                Format::from_type(FormatType::Playlist(Box::new(r.clone()))),
+                Format::from_type(FormatType::Playlist(Box::new(r.clone()));
               )
             })
             .collect::<Vec<String>>()
@@ -596,7 +594,7 @@ impl<'a> CliApp<'a> {
             .map(|r| {
               self.format_output(
                 format.clone(),
-                Format::from_type(FormatType::Track(Box::new(r.clone()))),
+                Format::from_type(FormatType::Track(Box::new(r.clone()));
               )
             })
             .collect::<Vec<String>>()
@@ -613,7 +611,7 @@ impl<'a> CliApp<'a> {
             .map(|r| {
               self.format_output(
                 format.clone(),
-                Format::from_type(FormatType::Artist(Box::new(r.clone()))),
+                Format::from_type(FormatType::Artist(Box::new(r.clone()));
               )
             })
             .collect::<Vec<String>>()
@@ -630,7 +628,7 @@ impl<'a> CliApp<'a> {
             .map(|r| {
               self.format_output(
                 format.clone(),
-                Format::from_type(FormatType::Show(Box::new(r.clone()))),
+                Format::from_type(FormatType::Show(Box::new(r.clone()));
               )
             })
             .collect::<Vec<String>>()
@@ -647,7 +645,7 @@ impl<'a> CliApp<'a> {
             .map(|r| {
               self.format_output(
                 format.clone(),
-                Format::from_type(FormatType::Album(Box::new(r.clone()))),
+                Format::from_type(FormatType::Album(Box::new(r.clone()));
               )
             })
             .collect::<Vec<String>>()

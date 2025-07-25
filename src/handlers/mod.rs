@@ -8,11 +8,10 @@ mod common_key_events;
 mod dialog;
 mod empty;
 mod episode_table;
-mod error_screen;
-mod help_menu;
 mod home;
 mod input;
 mod library;
+mod log_stream;
 mod made_for_you;
 mod playbar;
 mod playlist;
@@ -25,7 +24,8 @@ mod track_table;
 use super::app::{ActiveBlock, App, ArtistBlock, RouteId, SearchResultBlock};
 use crate::event::Key;
 use crate::network::IoEvent;
-use rspotify::model::{context::CurrentlyPlaybackContext, PlayingItem};
+use rspotify::model::{context::CurrentPlaybackContext, PlayableItem};
+use crate::network::PlayingItem;
 
 pub use input::handler as input_handler;
 
@@ -69,9 +69,6 @@ pub fn handle_app(key: Key, app: &mut App) {
     _ if key == app.user_config.keys.previous_track => {
       app.previous_track();
     }
-    _ if key == app.user_config.keys.help => {
-      app.set_current_route_state(Some(ActiveBlock::HelpMenu), None);
-    }
 
     _ if key == app.user_config.keys.shuffle => {
       app.shuffle();
@@ -93,6 +90,9 @@ pub fn handle_app(key: Key, app: &mut App) {
     }
     _ if key == app.user_config.keys.basic_view => {
       app.push_navigation_stack(RouteId::BasicView, ActiveBlock::BasicView);
+    }
+    Key::Char('l') => {
+      app.push_navigation_stack(RouteId::LogStream, ActiveBlock::LogStream);
     }
     _ => handle_block_events(key, app),
   }
@@ -119,12 +119,6 @@ fn handle_block_events(key: Key, app: &mut App) {
     }
     ActiveBlock::EpisodeTable => {
       episode_table::handler(key, app);
-    }
-    ActiveBlock::HelpMenu => {
-      help_menu::handler(key, app);
-    }
-    ActiveBlock::Error => {
-      error_screen::handler(key, app);
     }
     ActiveBlock::SelectDevice => {
       select_device::handler(key, app);
@@ -165,6 +159,12 @@ fn handle_block_events(key: Key, app: &mut App) {
     ActiveBlock::BasicView => {
       basic_view::handler(key, app);
     }
+    ActiveBlock::LogStream => {
+      log_stream::handler(key, app);
+    }
+    ActiveBlock::Error => {
+      // Error screen no longer exists, do nothing
+    }
     ActiveBlock::Dialog(_) => {
       dialog::handler(key, app);
     }
@@ -181,14 +181,14 @@ fn handle_escape(app: &mut App) {
         artist.artist_selected_block = ArtistBlock::Empty;
       }
     }
-    ActiveBlock::Error => {
-      app.pop_navigation_stack();
-    }
     ActiveBlock::Dialog(_) => {
       app.pop_navigation_stack();
     }
     // These are global views that have no active/inactive distinction so do nothing
     ActiveBlock::SelectDevice | ActiveBlock::Analysis => {}
+    ActiveBlock::LogStream => {
+      app.pop_navigation_stack();
+    }
     _ => {
       app.set_current_route_state(Some(ActiveBlock::Empty), None);
     }
@@ -197,30 +197,32 @@ fn handle_escape(app: &mut App) {
 
 fn handle_jump_to_context(app: &mut App) {
   if let Some(current_playback_context) = &app.current_playback_context {
-    if let Some(play_context) = current_playback_context.context.clone() {
-      match play_context._type {
-        rspotify::senum::Type::Album => handle_jump_to_album(app),
-        rspotify::senum::Type::Artist => handle_jump_to_artist_album(app),
-        rspotify::senum::Type::Playlist => {
-          app.dispatch(IoEvent::GetPlaylistTracks(play_context.uri, 0))
-        }
-        _ => {}
-      }
-    }
+    // TODO: Fix senum::Type for rspotify 0.15
+    // if let Some(play_context) = current_playback_context.context.clone() {
+    //   match play_context._type {
+    //     rspotify::senum::Type::Album => handle_jump_to_album(app),
+    //     rspotify::senum::Type::Artist => handle_jump_to_artist_album(app),
+    //     rspotify::senum::Type::Playlist => {
+    //       app.dispatch(IoEvent::GetPlaylistTracks(format!("spotify:track:{}", play_context.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string())), 0))
+    //     }
+    //     _ => {}
+    //   }
+    // }
   }
 }
 
 fn handle_jump_to_album(app: &mut App) {
-  if let Some(CurrentlyPlaybackContext {
+  if let Some(CurrentPlaybackContext {
     item: Some(item), ..
   }) = app.current_playback_context.to_owned()
   {
     match item {
-      PlayingItem::Track(track) => {
-        app.dispatch(IoEvent::GetAlbumTracks(Box::new(track.album)));
+      PlayableItem::Track(track) => {
+        app.dispatch(IoEvent::GetAlbumTracks(track.album.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string())));
       }
-      PlayingItem::Episode(episode) => {
-        app.dispatch(IoEvent::GetShowEpisodes(Box::new(episode.show)));
+      PlayableItem::Episode(_episode) => {
+        // Note: episode.show field not available in newer API
+        // app.dispatch(IoEvent::GetShowEpisodes(Box::new(episode.show)));
       }
     };
   }
@@ -228,20 +230,21 @@ fn handle_jump_to_album(app: &mut App) {
 
 // NOTE: this only finds the first artist of the song and jumps to their albums
 fn handle_jump_to_artist_album(app: &mut App) {
-  if let Some(CurrentlyPlaybackContext {
+  if let Some(CurrentPlaybackContext {
     item: Some(item), ..
   }) = app.current_playback_context.to_owned()
   {
     match item {
-      PlayingItem::Track(track) => {
+      PlayableItem::Track(track) => {
         if let Some(artist) = track.artists.first() {
-          if let Some(artist_id) = artist.id.clone() {
+          let artist_id = artist.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string());
+          if !artist_id.is_empty() {
             app.get_artist(artist_id, artist.name.clone());
             app.push_navigation_stack(RouteId::Artist, ActiveBlock::ArtistBlock);
           }
         }
       }
-      PlayingItem::Episode(_episode) => {
+      PlayableItem::Episode(_episode) => {
         // Do nothing for episode (yet!)
       }
     }

@@ -4,7 +4,7 @@ use rspotify::{
     album::SimplifiedAlbum, artist::FullArtist, artist::SimplifiedArtist,
     playlist::SimplifiedPlaylist, show::FullEpisode, show::SimplifiedShow, track::FullTrack,
   },
-  senum::RepeatState,
+  model::enums::RepeatState,
 };
 
 use crate::user_config::UserConfig;
@@ -153,9 +153,9 @@ pub enum Format {
   Device(String),
   Volume(u32),
   // Current position, duration
-  Position((u32, u32)),
+  Position((u32, u32);
   // This is a bit long, should it be splitted up?
-  Flags((RepeatState, bool, bool)),
+  Flags((RepeatState, bool, bool);
   Playing(bool),
 }
 
@@ -173,32 +173,32 @@ impl Format {
       FormatType::Album(a) => {
         let joined_artists = join_artists(a.artists.clone());
         let mut vec = vec![Self::Album(a.name), Self::Artist(joined_artists)];
-        if let Some(uri) = a.uri {
+        if let Some(uri) = format!("spotify:track:{}", a.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string())) {
           vec.push(Self::Uri(uri));
         }
         vec
       }
-      FormatType::Artist(a) => vec![Self::Artist(a.name), Self::Uri(a.uri)],
-      FormatType::Playlist(p) => vec![Self::Playlist(p.name), Self::Uri(p.uri)],
+      FormatType::Artist(a) => vec![Self::Artist(a.name), Self::Uri(format!("spotify:track:{}", a.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string())))],
+      FormatType::Playlist(p) => vec![Self::Playlist(p.name), Self::Uri(format!("spotify:track:{}", p.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string())))],
       FormatType::Track(t) => {
         let joined_artists = join_artists(t.artists.clone());
         vec![
           Self::Album(t.album.name),
           Self::Artist(joined_artists),
           Self::Track(t.name),
-          Self::Uri(t.uri),
+          Self::Uri(format!("spotify:track:{}", t.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string()));
         ]
       }
       FormatType::Show(r) => vec![
         Self::Artist(r.publisher),
         Self::Show(r.name),
-        Self::Uri(r.uri),
+        Self::Uri(format!("spotify:track:{}", r.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string()));
       ],
       FormatType::Episode(e) => vec![
         Self::Show(e.show.name),
         Self::Artist(e.show.publisher),
         Self::Track(e.name),
-        Self::Uri(e.uri),
+        Self::Uri(format!("spotify:track:{}", e.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string()));
       ],
     }
   }

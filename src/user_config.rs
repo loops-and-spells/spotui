@@ -5,7 +5,7 @@ use std::{
   fs,
   path::{Path, PathBuf},
 };
-use tui::style::Color;
+use ratatui::style::Color;
 
 const FILE_NAME: &str = "config.yml";
 const CONFIG_DIR: &str = ".config";
@@ -163,7 +163,6 @@ pub struct KeyBindingsString {
   seek_forwards: Option<String>,
   next_track: Option<String>,
   previous_track: Option<String>,
-  help: Option<String>,
   shuffle: Option<String>,
   repeat: Option<String>,
   search: Option<String>,
@@ -193,7 +192,6 @@ pub struct KeyBindings {
   pub seek_forwards: Key,
   pub next_track: Key,
   pub previous_track: Key,
-  pub help: Key,
   pub shuffle: Key,
   pub repeat: Key,
   pub search: Key,
@@ -275,7 +273,6 @@ impl UserConfig {
         seek_forwards: Key::Char('>'),
         next_track: Key::Char('n'),
         previous_track: Key::Char('p'),
-        help: Key::Char('?'),
         shuffle: Key::Ctrl('s'),
         repeat: Key::Ctrl('r'),
         search: Key::Char('/'),
@@ -358,7 +355,6 @@ impl UserConfig {
     to_keys!(seek_forwards);
     to_keys!(next_track);
     to_keys!(previous_track);
-    to_keys!(help);
     to_keys!(shuffle);
     to_keys!(repeat);
     to_keys!(search);
@@ -558,7 +554,7 @@ mod tests {
   #[test]
   fn parse_theme_item_test() {
     use super::parse_theme_item;
-    use tui::style::Color;
+    use ratatui::style::Color;
     assert_eq!(parse_theme_item("Reset").unwrap(), Color::Reset);
     assert_eq!(parse_theme_item("Black").unwrap(), Color::Black);
     assert_eq!(parse_theme_item("Red").unwrap(), Color::Red);

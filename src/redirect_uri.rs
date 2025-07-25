@@ -1,15 +1,14 @@
-use rspotify::{oauth2::SpotifyOAuth, util::request_token};
 use std::{
   io::prelude::*,
   net::{TcpListener, TcpStream},
 };
 
-pub fn redirect_uri_web_server(spotify_oauth: &mut SpotifyOAuth, port: u16) -> Result<String, ()> {
+pub fn redirect_uri_web_server_modern(port: u16) -> anyhow::Result<String> {
   let listener = TcpListener::bind(format!("127.0.0.1:{}", port));
 
   match listener {
     Ok(listener) => {
-      request_token(spotify_oauth);
+      println!("Waiting for Spotify authentication callback on port {}...", port);
 
       for stream in listener.incoming() {
         match stream {
@@ -25,11 +24,11 @@ pub fn redirect_uri_web_server(spotify_oauth: &mut SpotifyOAuth, port: u16) -> R
       }
     }
     Err(e) => {
-      println!("Error: {}", e);
+      return Err(anyhow::anyhow!("Error binding to port {}: {}", port, e));
     }
   }
 
-  Err(())
+  Err(anyhow::anyhow!("Failed to get redirect URL"))
 }
 
 fn handle_connection(mut stream: TcpStream) -> Option<String> {
@@ -60,7 +59,11 @@ fn handle_connection(mut stream: TcpStream) -> Option<String> {
 fn respond_with_success(mut stream: TcpStream) {
   let contents = include_str!("redirect_uri.html");
 
-  let response = format!("HTTP/1.1 200 OK\r\n\r\n{}", contents);
+  let response = format!(
+    "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{}",
+    contents.len(),
+    contents
+  );
 
   stream.write_all(response.as_bytes()).unwrap();
   stream.flush().unwrap();

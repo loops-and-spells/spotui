@@ -7,7 +7,7 @@ use std::{
   path::{Path, PathBuf},
 };
 
-const DEFAULT_PORT: u16 = 8888;
+const DEFAULT_PORT: u16 = 8000;
 const FILE_NAME: &str = "client.yml";
 const CONFIG_DIR: &str = ".config";
 const APP_CONFIG_DIR: &str = "spotify-tui";
@@ -38,7 +38,7 @@ impl ClientConfig {
   }
 
   pub fn get_redirect_uri(&self) -> String {
-    format!("http://localhost:{}/callback", self.get_port())
+    format!("http://127.0.0.1:{}/callback", self.get_port())
   }
 
   pub fn get_port(&self) -> u16 {
@@ -115,7 +115,7 @@ impl ClientConfig {
         "Click `Create a Client ID` and create an app",
         "Now click `Edit Settings`",
         &format!(
-          "Add `http://localhost:{}/callback` to the Redirect URIs",
+          "Add `http://127.0.0.1:{}/callback` to the Redirect URIs",
           DEFAULT_PORT
         ),
         "You are now ready to authenticate with Spotify!",

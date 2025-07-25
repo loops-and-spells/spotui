@@ -44,7 +44,7 @@ pub fn handler(key: Key, app: &mut App) {
       let artists = app.artists.to_owned();
       if !artists.is_empty() {
         let artist = &artists[app.artists_list_index];
-        app.get_artist(artist.id.clone(), artist.name.clone());
+        app.get_artist(artist.id.to_string(), artist.name.clone());
         app.push_navigation_stack(RouteId::Artist, ActiveBlock::ArtistBlock);
       }
     }
@@ -54,9 +54,7 @@ pub fn handler(key: Key, app: &mut App) {
       let artist = artists.get(app.artists_list_index);
       if let Some(artist) = artist {
         app.dispatch(IoEvent::StartPlayback(
-          Some(artist.uri.to_owned()),
-          None,
-          None,
+          Some(format!("spotify:artist:{}", artist.id))
         ));
       }
     }
@@ -65,7 +63,7 @@ pub fn handler(key: Key, app: &mut App) {
       let artist = artists.get(app.artists_list_index);
       if let Some(artist) = artist {
         let artist_name = artist.name.clone();
-        let artist_id_list: Option<Vec<String>> = Some(vec![artist.id.clone()]);
+        let artist_id_list: Option<Vec<String>> = Some(vec![artist.id.to_string()]);
 
         app.recommendations_context = Some(RecommendationsContext::Artist);
         app.recommendations_seed = artist_name;

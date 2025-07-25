@@ -1,17 +1,17 @@
-use clap::{App, Arg, ArgGroup, SubCommand};
+use clap::{Arg, ArgGroup, Command};
 
-fn device_arg() -> Arg<'static, 'static> {
-  Arg::with_name("device")
-    .short("d")
+fn device_arg() -> Arg {
+  Arg::new("device")
+    .short('d')
     .long("device")
     .takes_value(true)
     .value_name("DEVICE")
     .help("Specifies the spotify device to use")
 }
 
-fn format_arg() -> Arg<'static, 'static> {
-  Arg::with_name("format")
-    .short("f")
+fn format_arg() -> Arg {
+  Arg::new("format")
+    .short('f')
     .long("format")
     .takes_value(true)
     .value_name("FORMAT")
@@ -23,8 +23,8 @@ Example: spt pb -s -f 'playing on %d at %v%'",
     )
 }
 
-pub fn playback_subcommand() -> App<'static, 'static> {
-  SubCommand::with_name("playback")
+pub fn playback_subcommand() -> Command {
+  Command::new("playback")
     .version(env!("CARGO_PKG_VERSION"))
     .author(env!("CARGO_PKG_AUTHORS"))
     .about("Interacts with the playback of a device")

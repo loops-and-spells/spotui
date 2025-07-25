@@ -68,9 +68,9 @@ pub fn handler(key: Key, app: &mut App) {
       };
     }
     Key::Enter => {
-      if let (Some(devices), Some(index)) = (app.devices.clone(), app.selected_device_index) {
+      if let (Some(devices), Some(index)) = (&app.devices, app.selected_device_index) {
         if let Some(device) = &devices.devices.get(index) {
-          app.dispatch(IoEvent::TransferPlaybackToDevice(device.id.clone()));
+          app.dispatch(IoEvent::TransferPlaybackToDevice(device.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string())));
         }
       };
     }

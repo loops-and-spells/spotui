@@ -131,9 +131,10 @@ pub fn handle_right_event(app: &mut App) {
         app.set_current_route_state(Some(ActiveBlock::Home), Some(ActiveBlock::Home));
       }
       RouteId::SelectedDevice => {}
-      RouteId::Error => {}
       RouteId::Analysis => {}
       RouteId::BasicView => {}
+      RouteId::LogStream => {}
+      RouteId::Error => {}
       RouteId::Dialog => {}
     },
     _ => {}

@@ -110,7 +110,7 @@ fn process_input(app: &mut App, input: String) {
   }
 
   // Default fallback behavior: treat the input as a raw search phrase.
-  app.dispatch(IoEvent::GetSearchResults(input, app.get_user_country()));
+  app.dispatch(IoEvent::GetSearchResults(input));
   app.push_navigation_stack(RouteId::Search, ActiveBlock::SearchResultBlock);
 }
 
@@ -149,7 +149,7 @@ fn attempt_process_uri(app: &mut App, input: &str, base: &str, sep: &str) -> boo
 
   let (playlist_id, matched) = spotify_resource_id(base, input, sep, "playlist");
   if matched {
-    app.dispatch(IoEvent::GetPlaylistTracks(playlist_id, 0));
+    app.dispatch(IoEvent::GetPlaylistTracks(playlist_id.to_string(), 0));
     return true;
   }
 
