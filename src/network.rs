@@ -337,27 +337,30 @@ impl Network {
       Ok(Some(context)) => {
         let mut app = self.app.lock().await;
         
-        // Log playback status
-        if context.is_playing {
-          app.add_log_message("Status: Music is currently playing".to_string());
-        } else {
-          app.add_log_message("Status: Music is paused".to_string());
-        }
+        // Don't log playback status on every poll to avoid spam
         
         // Store the playback context  
         app.current_playback_context = Some(context);
-        // Playback context updated
+        
+        // Reset polling state
+        app.is_fetching_current_playback = false;
+        app.instant_since_last_current_playback_poll = std::time::Instant::now();
       }
       Ok(None) => {
         let mut app = self.app.lock().await;
-        app.add_log_message("No music currently playing - press 'd' to select a device".to_string());
-        // No current playback - already logged
+        app.current_playback_context = None;
+        
+        // Reset polling state
+        app.is_fetching_current_playback = false;
+        app.instant_since_last_current_playback_poll = std::time::Instant::now();
       }
       Err(e) => {
         let mut app = self.app.lock().await;
-        app.add_log_message("Unable to check current playback status".to_string());
-        // Error getting playback - already logged
-        // Don't show this as an error in the UI since no current playback is normal
+        // Don't log polling errors to avoid spam
+        
+        // Reset polling state even on error
+        app.is_fetching_current_playback = false;
+        app.instant_since_last_current_playback_poll = std::time::Instant::now();
       }
     }
   }
@@ -668,8 +671,8 @@ impl Network {
           app.selected_device_index = Some(0); // Select first device by default
         }
         
-        app.push_navigation_stack(RouteId::SelectedDevice, ActiveBlock::SelectDevice);
-        // Device count already logged
+        // No need to navigate - we're already on the device screen
+        app.add_log_message("Devices loaded successfully".to_string());
       }
       Err(e) => {
         let mut app = self.app.lock().await;

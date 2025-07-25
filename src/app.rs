@@ -667,19 +667,26 @@ impl App {
       .map(|last_route| last_route.id == next_route_id)
       .unwrap_or(false)
     {
+      self.add_log_message(format!("Pushing to navigation stack: {:?} / {:?}", next_route_id, next_active_block));
       self.navigation_stack.push(Route {
         id: next_route_id,
         active_block: next_active_block,
         hovered_block: next_active_block,
       });
+      self.add_log_message(format!("Navigation stack after push: {:?}", 
+        self.navigation_stack.iter().map(|r| format!("{:?}", r.active_block)).collect::<Vec<_>>()));
     }
   }
 
   pub fn pop_navigation_stack(&mut self) -> Option<Route> {
+    self.add_log_message(format!("Popping navigation stack. Current size: {}", self.navigation_stack.len()));
     if self.navigation_stack.len() == 1 {
       None
     } else {
-      self.navigation_stack.pop()
+      let popped = self.navigation_stack.pop();
+      self.add_log_message(format!("Navigation stack after pop: {:?}", 
+        self.navigation_stack.iter().map(|r| format!("{:?}", r.active_block)).collect::<Vec<_>>()));
+      popped
     }
   }
 

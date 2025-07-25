@@ -45,6 +45,10 @@ pub fn handle_app(key: Key, app: &mut App) {
       handle_jump_to_context(app);
     }
     _ if key == app.user_config.keys.manage_devices => {
+      app.add_log_message("Opening device selection screen...".to_string());
+      // Navigate to device screen immediately, like 'l' does for log stream
+      app.push_navigation_stack(RouteId::SelectedDevice, ActiveBlock::SelectDevice);
+      // Then fetch the devices
       app.dispatch(IoEvent::GetDevices);
     }
     _ if key == app.user_config.keys.decrease_volume => {
@@ -184,8 +188,11 @@ fn handle_escape(app: &mut App) {
     ActiveBlock::Dialog(_) => {
       app.pop_navigation_stack();
     }
-    // These are global views that have no active/inactive distinction so do nothing
-    ActiveBlock::SelectDevice | ActiveBlock::Analysis => {}
+    // These are global views that have no active/inactive distinction
+    ActiveBlock::SelectDevice => {
+      app.pop_navigation_stack();
+    }
+    ActiveBlock::Analysis => {}
     ActiveBlock::LogStream => {
       app.pop_navigation_stack();
     }

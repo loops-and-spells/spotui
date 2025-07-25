@@ -6,9 +6,6 @@ use crate::event::Key;
 
 pub fn handler(key: Key, app: &mut App) {
   match key {
-    Key::Esc => {
-      app.pop_navigation_stack();
-    }
     k if common_key_events::down_event(k) => {
       if !app.log_messages.is_empty() {
         let new_index = if app.log_stream_selected_index < app.log_messages.len() - 1 {
