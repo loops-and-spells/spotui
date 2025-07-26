@@ -1432,7 +1432,9 @@ impl Network {
     
     if let Some(manager) = &mut app.album_art_manager {
       // Use different sizes based on idle mode
-      let size = if is_idle { 96 } else { 16 };
+      // For idle mode, fetch larger size for better quality when scaling
+      // For normal mode, also fetch larger size since we're scaling it up in the playbar
+      let size = if is_idle { 256 } else { 64 };
       
       match manager.get_album_art(&url, size).await {
         Ok(art) => {

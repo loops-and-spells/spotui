@@ -187,10 +187,13 @@ pub fn draw_input_and_help_box<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
 pub fn draw_main_layout(f: &mut Frame, app: &App) {
   let margin = util::get_main_layout_margin(app);
   // Responsive layout: new one kicks in at width 150 or higher
+  // Calculate playbar height dynamically based on terminal height
+  let playbar_height = (f.area().height / 5).max(6).min(14);
+  
   if app.size.width >= SMALL_TERMINAL_WIDTH && !app.user_config.behavior.enforce_wide_search_bar {
     let parent_layout = Layout::default()
       .direction(Direction::Vertical)
-      .constraints([Constraint::Min(1), Constraint::Length(8)].as_ref())
+      .constraints([Constraint::Min(1), Constraint::Length(playbar_height)].as_ref())
       .margin(margin)
       .split(f.area());
 
@@ -206,7 +209,7 @@ pub fn draw_main_layout(f: &mut Frame, app: &App) {
         [
           Constraint::Length(3),
           Constraint::Min(1),
-          Constraint::Length(8),
+          Constraint::Length(playbar_height),
         ]
         .as_ref(),
       )
@@ -931,21 +934,35 @@ pub fn draw_basic_view(f: &mut Frame, app: &App) {
 
 pub fn draw_playbar<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
 {
+  // Get dynamic colors from album art if available
+  let (vibrant_color, dark_color) = if let Some(art) = &app.current_album_art {
+    get_album_art_colors(art)
+  } else {
+    (Color::Cyan, Color::DarkGray)
+  };
+  
+  // Calculate square album art size based on playbar height
+  // The album art should fill the entire height minus borders
+  let inner_height = layout_chunk.height.saturating_sub(2); // Account for borders
+  // Since terminal characters are ~2:1 ratio, we need double the width for square appearance
+  // Add a bit more width to ensure the art can fill the full height
+  let album_art_width = (inner_height * 2) + 2;
+  
   // First split horizontally to make room for album art
+  let constraints: &[Constraint] = if app.current_album_art.is_some() {
+    &[Constraint::Length(album_art_width), Constraint::Min(1)]
+  } else {
+    &[Constraint::Min(1)]
+  };
+  
   let horizontal_chunks = Layout::default()
     .direction(Direction::Horizontal)
-    .constraints(
-      if app.current_album_art.is_some() {
-        [Constraint::Length(20), Constraint::Min(1)].as_ref()
-      } else {
-        [Constraint::Min(1)].as_ref()
-      }
-    )
+    .constraints(constraints)
     .split(layout_chunk);
 
   // If we have album art, draw it in the left chunk
   if app.current_album_art.is_some() {
-    draw_album_art(f, app, horizontal_chunks[0]);
+    draw_album_art_dynamic(f, app, horizontal_chunks[0]);
   }
 
   // Use the right chunk (or full area if no art) for the playbar
@@ -1076,14 +1093,14 @@ pub fn draw_playbar<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
       let song_progress = Gauge::default()
         .gauge_style(
           Style::default()
-            .fg(app.user_config.theme.playbar_progress)
-            .bg(app.user_config.theme.playbar_background)
+            .fg(vibrant_color)
+            .bg(dark_color)
             .add_modifier(modifier),
         )
         .percent(perc)
         .label(Span::styled(
           &song_progress_label,
-          Style::default().fg(app.user_config.theme.playbar_progress_text),
+          Style::default().fg(Color::White),
         ));
       f.render_widget(song_progress, chunks[2]);
     } else {
@@ -2033,6 +2050,127 @@ pub fn draw_log_stream_full_screen(f: &mut Frame, app: &App) {
   draw_log_stream::<CrosstermBackend<std::io::Stdout>>(f, app, chunks[1]);
 }
 
+/// Extract vibrant and dark colors from album art
+fn get_album_art_colors(art: &crate::album_art::PixelatedAlbumArt) -> (Color, Color) {
+  let mut darkest_color = art.pixels[0][0].to_ratatui_color();
+  let mut min_brightness = u32::MAX;
+  let mut vibrant_color = art.pixels[0][0].to_ratatui_color();
+  let mut max_vibrancy = 0.0;
+  
+  for row in &art.pixels {
+    for pixel in row {
+      // Calculate brightness (simple sum of RGB values)
+      let brightness = pixel.r as u32 + pixel.g as u32 + pixel.b as u32;
+      if brightness < min_brightness {
+        min_brightness = brightness;
+        darkest_color = pixel.to_ratatui_color();
+      }
+      
+      // Calculate vibrancy (saturation * brightness)
+      let r = pixel.r as f32 / 255.0;
+      let g = pixel.g as f32 / 255.0;
+      let b = pixel.b as f32 / 255.0;
+      
+      let max_component = r.max(g).max(b);
+      let min_component = r.min(g).min(b);
+      let saturation = if max_component > 0.0 {
+        (max_component - min_component) / max_component
+      } else {
+        0.0
+      };
+      
+      // Vibrancy is a combination of saturation and brightness
+      // We want colors that are both bright and saturated
+      let vibrancy = saturation * max_component;
+      
+      if vibrancy > max_vibrancy && brightness > 100 { // Ensure it's not too dark
+        max_vibrancy = vibrancy;
+        vibrant_color = pixel.to_ratatui_color();
+      }
+    }
+  }
+  
+  // Ensure good contrast between foreground and background colors
+  let (vibrant_color, darkest_color) = ensure_color_contrast(vibrant_color, darkest_color);
+  
+  (vibrant_color, darkest_color)
+}
+
+/// Ensure sufficient contrast between two colors for progress bar visibility
+fn ensure_color_contrast(fg: Color, bg: Color) -> (Color, Color) {
+  // Get RGB values for both colors
+  let (fg_r, fg_g, fg_b) = match fg {
+    Color::Rgb(r, g, b) => (r as f32, g as f32, b as f32),
+    _ => (128.0, 128.0, 128.0), // Default fallback
+  };
+  
+  let (bg_r, bg_g, bg_b) = match bg {
+    Color::Rgb(r, g, b) => (r as f32, g as f32, b as f32),
+    _ => (64.0, 64.0, 64.0), // Default fallback
+  };
+  
+  // Calculate relative luminance using WCAG formula
+  let fg_lum = (0.2126 * fg_r + 0.7152 * fg_g + 0.0722 * fg_b) / 255.0;
+  let bg_lum = (0.2126 * bg_r + 0.7152 * bg_g + 0.0722 * bg_b) / 255.0;
+  
+  // Calculate contrast ratio
+  let lighter = fg_lum.max(bg_lum);
+  let darker = fg_lum.min(bg_lum);
+  let contrast_ratio = (lighter + 0.05) / (darker + 0.05);
+  
+  // If contrast is insufficient (less than 3:1), adjust colors
+  if contrast_ratio < 3.0 {
+    // If foreground is lighter, make it even lighter; if darker, make it darker
+    let adjusted_fg = if fg_lum > bg_lum {
+      // Lighten the foreground
+      Color::Rgb(
+        ((fg_r * 1.5).min(255.0)) as u8,
+        ((fg_g * 1.5).min(255.0)) as u8,
+        ((fg_b * 1.5).min(255.0)) as u8,
+      )
+    } else {
+      // Darken the background instead and lighten foreground
+      let adjusted_bg = Color::Rgb(
+        ((bg_r * 0.5).max(0.0)) as u8,
+        ((bg_g * 0.5).max(0.0)) as u8,
+        ((bg_b * 0.5).max(0.0)) as u8,
+      );
+      return (fg, adjusted_bg);
+    };
+    (adjusted_fg, bg)
+  } else {
+    (fg, bg)
+  }
+}
+
+/// Calculate optimal text color for progress bar that contrasts with both filled and unfilled portions
+fn calculate_text_color_for_progress(fg_color: Color, bg_color: Color) -> Color {
+  // Get luminance of both colors
+  let fg_lum = match fg_color {
+    Color::Rgb(r, g, b) => {
+      (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) / 255.0
+    }
+    _ => 0.5,
+  };
+  
+  let bg_lum = match bg_color {
+    Color::Rgb(r, g, b) => {
+      (0.2126 * r as f32 + 0.7152 * g as f32 + 0.0722 * b as f32) / 255.0
+    }
+    _ => 0.2,
+  };
+  
+  // Calculate average luminance since text will appear over both
+  let avg_lum = (fg_lum + bg_lum) / 2.0;
+  
+  // Choose white or black based on which provides better contrast
+  if avg_lum < 0.5 {
+    Color::White
+  } else {
+    Color::Black
+  }
+}
+
 fn draw_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) {
   if let Some(art) = &app.current_album_art {
     // Create a block for the album art
@@ -2079,47 +2217,102 @@ fn draw_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) {
   }
 }
 
+/// Draw album art with dynamic sizing to fill available space
+fn draw_album_art_dynamic(f: &mut Frame, app: &App, layout_chunk: Rect) {
+  if let Some(art) = &app.current_album_art {
+    // Create a block for the album art
+    let block = Block::default()
+      .borders(Borders::ALL)
+      .border_type(BorderType::Rounded)
+      .border_style(Style::default().fg(app.user_config.theme.inactive));
+    
+    let inner_area = block.inner(layout_chunk);
+    f.render_widget(block, layout_chunk);
+    
+    // Calculate the maximum size that maintains square aspect ratio
+    // For the playbar, we want to use all available height
+    let available_height = inner_area.height;
+    let available_width = inner_area.width / 2; // Divide by 2 for double-width chars
+    
+    // Use the full height available, constrained by width for square aspect
+    let display_size = available_height.min(available_width);
+    
+    // Center horizontally only, align to top to fill vertical space
+    let x_offset = (inner_area.width.saturating_sub(display_size * 2)) / 2;
+    let y_offset = 0; // No vertical offset - fill from top to bottom
+    
+    // Scale factor from source to display
+    let scale_x = art.width as f32 / display_size as f32;
+    let scale_y = art.height as f32 / display_size as f32;
+    
+    // Render scaled pixels
+    for dy in 0..display_size {
+      let y_pos = inner_area.y + y_offset + dy;
+      if y_pos >= inner_area.y + inner_area.height {
+        break;
+      }
+      
+      // Map display y to source y
+      let src_y = (dy as f32 * scale_y) as usize;
+      if src_y >= art.pixels.len() {
+        continue;
+      }
+      
+      for dx in 0..display_size {
+        let x_pos = inner_area.x + x_offset + (dx * 2); // Double width for square appearance
+        if x_pos + 1 >= inner_area.x + inner_area.width {
+          break;
+        }
+        
+        // Map display x to source x
+        let src_x = (dx as f32 * scale_x) as usize;
+        if src_x >= art.pixels[src_y].len() {
+          continue;
+        }
+        
+        let pixel = &art.pixels[src_y][src_x];
+        let color = pixel.to_ratatui_color();
+        
+        // Use double-width block for square appearance
+        let pixel_span = Span::styled("██", Style::default().fg(color));
+        let paragraph = Paragraph::new(pixel_span);
+        let pixel_area = Rect {
+          x: x_pos,
+          y: y_pos,
+          width: 2,
+          height: 1,
+        };
+        f.render_widget(paragraph, pixel_area);
+      }
+    }
+  }
+}
+
 /// Draw the idle mode screensaver with large album art
 pub fn draw_idle_mode(f: &mut Frame, app: &App) {
-  // Split the screen into vertical sections
+  // No border in fullscreen mode - use the entire area
+  let area = f.area();
+  
+  // Reserve bottom space for track info and progress
   let chunks = Layout::default()
     .direction(Direction::Vertical)
     .constraints([
-      Constraint::Percentage(10),  // Top margin
-      Constraint::Percentage(80),  // Album art area
-      Constraint::Percentage(10),  // Bottom area for progress bar
+      Constraint::Min(1),      // Album art area (takes remaining space)
+      Constraint::Length(3),   // Progress bar with track info (3 lines tall)
     ].as_ref())
-    .split(f.area());
+    .split(area);
 
-  // Draw large album art in the center
-  if app.current_album_art.is_some() {
-    // Split horizontally to center the album art
-    let horizontal_chunks = Layout::default()
-      .direction(Direction::Horizontal)
-      .constraints([
-        Constraint::Percentage(10),
-        Constraint::Percentage(80),
-        Constraint::Percentage(10),
-      ].as_ref())
-      .split(chunks[1]);
+  // Draw fullscreen album art and get dynamic colors
+  let (vibrant_color, dark_color) = if app.current_album_art.is_some() {
+    draw_fullscreen_album_art(f, app, chunks[0])
+  } else {
+    (Color::Cyan, Color::DarkGray)
+  };
 
-    // Draw the album art in the center chunk
-    draw_large_album_art(f, app, horizontal_chunks[1]);
-  }
-
-  // Draw progress bar at the bottom
+  // Draw track info and progress bar at the bottom
   if let Some(context) = &app.current_playback_context {
     if let Some(item) = &context.item {
-      let progress_chunks = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-          Constraint::Percentage(50),
-          Constraint::Percentage(50),
-        ].as_ref())
-        .margin(2)
-        .split(chunks[2]);
-
-      // Draw track info
+      // Get track info
       let track_info = match item {
         PlayableItem::Track(track) => {
           format!("{} - {}", track.name, create_artist_string(&track.artists))
@@ -2127,12 +2320,7 @@ pub fn draw_idle_mode(f: &mut Frame, app: &App) {
         PlayableItem::Episode(episode) => episode.name.clone(),
       };
 
-      let track_paragraph = Paragraph::new(track_info)
-        .style(Style::default().fg(app.user_config.theme.selected))
-        .alignment(Alignment::Center);
-      f.render_widget(track_paragraph, progress_chunks[0]);
-
-      // Draw progress bar
+      // Calculate progress
       let (progress_ms, duration_ms) = match item {
         PlayableItem::Track(track) => {
           let duration = track.duration.num_milliseconds() as u32;
@@ -2153,68 +2341,93 @@ pub fn draw_idle_mode(f: &mut Frame, app: &App) {
       let progress_perc = get_track_progress_percentage(progress_ms as u128, duration_ms);
       let progress_ratio = f64::from(progress_perc) / 100.0;
       
+      // Use a single 3-line tall progress bar that spans the full width
+      let progress_area = chunks[1];
+      
+      // Calculate text color with good contrast against the progress bar
+      // We need to consider both filled and unfilled portions
+      let text_color = calculate_text_color_for_progress(vibrant_color, dark_color);
+      
       let progress_bar = Gauge::default()
         .block(Block::default().borders(Borders::NONE))
         .gauge_style(Style::default()
-          .fg(app.user_config.theme.selected)
-          .bg(app.user_config.theme.inactive))
-        .ratio(progress_ratio);
-      f.render_widget(progress_bar, progress_chunks[1]);
+          .fg(vibrant_color)
+          .bg(dark_color))
+        .ratio(progress_ratio)
+        .label(Span::styled(
+          track_info,
+          Style::default().fg(text_color).add_modifier(Modifier::BOLD),
+        ));
+      f.render_widget(progress_bar, progress_area);
     }
   }
 }
 
-/// Draw large album art for idle mode
-fn draw_large_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) {
+/// Draw fullscreen album art that fills the available space
+fn draw_fullscreen_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) -> (Color, Color) {
   if let Some(art) = &app.current_album_art {
-    // Create a block for the album art
-    let block = Block::default()
-      .borders(Borders::ALL)
-      .border_type(BorderType::Rounded)
-      .border_style(Style::default().fg(app.user_config.theme.inactive));
+    // Get dynamic colors from the album art
+    let (vibrant_color, darkest_color) = get_album_art_colors(art);
     
-    let inner_area = block.inner(layout_chunk);
-    f.render_widget(block, layout_chunk);
+    // Fill the entire background with the darkest color
+    let background = Block::default()
+      .style(Style::default().bg(darkest_color));
+    f.render_widget(background, layout_chunk);
     
-    // For large display, render with double-width characters
-    let mut lines = Vec::new();
-    for row in &art.pixels {
-      let mut line = Vec::new();
-      for pixel in row {
-        // Use double-width block for screensaver mode
-        line.push(("██".to_string(), pixel.to_ratatui_color()));
-      }
-      lines.push(line);
-    }
+    // Calculate the maximum size we can display
+    // Account for double-width characters (2:1 aspect ratio)
+    let available_width = layout_chunk.width / 2;  // Divide by 2 for double-width chars
+    let available_height = layout_chunk.height;
     
-    // Calculate centering offsets (accounting for double-width)
-    let y_offset = inner_area.height.saturating_sub(lines.len() as u16) / 2;
-    let x_offset = inner_area.width.saturating_sub(art.width as u16 * 2) / 2;
+    // Determine the size to use (maintain square aspect ratio)
+    let display_size = available_width.min(available_height) as u32;
     
-    // Render each line of pixels
-    for (y, line) in lines.iter().enumerate() {
-      let y_pos = inner_area.y + y_offset + y as u16;
-      if y_pos >= inner_area.y + inner_area.height {
+    // Calculate actual pixel size based on the original art size
+    let scale_factor = display_size as f32 / art.width as f32;
+    
+    // Center the art in the available space
+    let x_offset = (layout_chunk.width.saturating_sub(display_size as u16 * 2)) / 2;
+    let y_offset = (layout_chunk.height.saturating_sub(display_size as u16)) / 2;
+    
+    // Render the album art scaled to fit
+    for y in 0..display_size {
+      let y_pos = layout_chunk.y + y_offset + y as u16;
+      if y_pos >= layout_chunk.y + layout_chunk.height {
         break;
       }
       
-      for (x, (ch, color)) in line.iter().enumerate() {
-        let x_pos = inner_area.x + x_offset + (x as u16 * 2);
-        if x_pos + 2 > inner_area.x + inner_area.width {
+      for x in 0..display_size {
+        let x_pos = layout_chunk.x + x_offset + (x as u16 * 2);
+        if x_pos + 2 > layout_chunk.x + layout_chunk.width {
           break;
         }
         
-        // Render each pixel as a colored block
-        let pixel = Span::styled(ch, Style::default().fg(*color));
-        let paragraph = Paragraph::new(pixel);
-        let pixel_area = Rect {
-          x: x_pos,
-          y: y_pos,
-          width: 2,
-          height: 1,
-        };
-        f.render_widget(paragraph, pixel_area);
+        // Map display coordinates back to original art coordinates
+        let src_x = (x as f32 / scale_factor) as usize;
+        let src_y = (y as f32 / scale_factor) as usize;
+        
+        // Get the pixel color from the original art
+        if src_y < art.pixels.len() && src_x < art.pixels[src_y].len() {
+          let color = art.pixels[src_y][src_x].to_ratatui_color();
+          
+          // Render double-width block
+          let pixel = Span::styled("██", Style::default().fg(color));
+          let paragraph = Paragraph::new(pixel);
+          let pixel_area = Rect {
+            x: x_pos,
+            y: y_pos,
+            width: 2,
+            height: 1,
+          };
+          f.render_widget(paragraph, pixel_area);
+        }
       }
     }
+    
+    // Return the colors for progress bar theming
+    (vibrant_color, darkest_color)
+  } else {
+    // Default colors if no album art
+    (Color::Cyan, Color::DarkGray)
   }
 }
