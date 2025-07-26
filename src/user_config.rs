@@ -221,6 +221,7 @@ pub struct BehaviorConfigString {
   pub playing_icon: Option<String>,
   pub paused_icon: Option<String>,
   pub set_window_title: Option<bool>,
+  pub idle_timeout_seconds: Option<u64>,
 }
 
 #[derive(Clone)]
@@ -238,6 +239,7 @@ pub struct BehaviorConfig {
   pub playing_icon: String,
   pub paused_icon: String,
   pub set_window_title: bool,
+  pub idle_timeout_seconds: u64,
 }
 
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -300,6 +302,7 @@ impl UserConfig {
         playing_icon: "▶".to_string(),
         paused_icon: "⏸".to_string(),
         set_window_title: true,
+        idle_timeout_seconds: 15,
       },
       path_to_config: None,
     }
@@ -459,6 +462,14 @@ impl UserConfig {
 
     if let Some(set_window_title) = behavior_config.set_window_title {
       self.behavior.set_window_title = set_window_title;
+    }
+
+    if let Some(idle_timeout) = behavior_config.idle_timeout_seconds {
+      if idle_timeout == 0 {
+        return Err(anyhow!("Idle timeout must be greater than 0"));
+      } else {
+        self.behavior.idle_timeout_seconds = idle_timeout;
+      }
     }
 
     Ok(())

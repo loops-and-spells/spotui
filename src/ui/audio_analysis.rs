@@ -19,7 +19,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     .direction(Direction::Vertical)
     .constraints([Constraint::Min(5), Constraint::Length(95)].as_ref())
     .margin(margin)
-    .split(f.size());
+    .split(f.area());
 
   let analysis_block = Block::default()
     .title(Span::styled(

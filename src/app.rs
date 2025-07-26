@@ -1,6 +1,7 @@
 use super::user_config::UserConfig;
 use crate::network::IoEvent;
 use crate::focus_manager::{FocusManager, ComponentId, FocusState};
+use crate::album_art::{AlbumArtManager, PixelatedAlbumArt};
 use rspotify::model::PlayableItem;
 use anyhow::anyhow;
 use rspotify::{
@@ -334,6 +335,11 @@ pub struct App {
   pub log_stream_selected_index: usize,
   pub log_stream_scroll_offset: usize,
   pub focus_manager: FocusManager,
+  pub album_art_manager: Option<AlbumArtManager>,
+  pub current_album_art: Option<PixelatedAlbumArt>,
+  pub current_album_art_url: Option<String>,
+  pub last_user_interaction: Instant,
+  pub is_idle_mode: bool,
 }
 
 impl Default for App {
@@ -423,6 +429,11 @@ impl Default for App {
       log_stream_selected_index: 0,
       log_stream_scroll_offset: 0,
       focus_manager: FocusManager::new(),
+      album_art_manager: AlbumArtManager::new().ok(),
+      current_album_art: None,
+      current_album_art_url: None,
+      last_user_interaction: Instant::now(),
+      is_idle_mode: false,
     }
   }
 }
@@ -1410,6 +1421,55 @@ impl App {
   /// Get currently hovered component
   pub fn get_hovered_component(&self) -> Option<&ComponentId> {
     self.focus_manager.get_hovered()
+  }
+
+  /// Update album art for current playing track
+  pub fn update_album_art(&mut self) {
+    if let Some(context) = &self.current_playback_context {
+      if let Some(item) = &context.item {
+        match item {
+          PlayableItem::Track(track) => {
+            // Get the smallest album image (we'll resize it anyway)
+            if let Some(image) = track.album.images.iter().min_by_key(|img| img.width.unwrap_or(1000)) {
+              // Only fetch if URL has changed
+              if self.current_album_art_url.as_ref() != Some(&image.url) {
+                self.current_album_art_url = Some(image.url.clone());
+                // Dispatch an event to fetch the album art asynchronously
+                self.dispatch(IoEvent::FetchAlbumArt(image.url.clone()));
+              }
+            }
+          }
+          PlayableItem::Episode(_) => {
+            // Episodes might have show artwork
+            self.current_album_art = None;
+            self.current_album_art_url = None;
+          }
+        }
+      }
+    }
+  }
+
+  /// Reset idle timer on user interaction
+  pub fn reset_idle_timer(&mut self) {
+    self.last_user_interaction = Instant::now();
+    if self.is_idle_mode {
+      self.is_idle_mode = false;
+      // Re-fetch smaller album art for normal mode
+      if let Some(url) = &self.current_album_art_url {
+        self.dispatch(IoEvent::FetchAlbumArt(url.clone()));
+      }
+    }
+  }
+
+  /// Check if app should enter idle mode
+  pub fn check_idle_mode(&mut self, idle_timeout_secs: u64) {
+    if self.last_user_interaction.elapsed().as_secs() >= idle_timeout_secs && !self.is_idle_mode {
+      self.is_idle_mode = true;
+      // Fetch larger album art for idle mode
+      if let Some(url) = &self.current_album_art_url {
+        self.dispatch(IoEvent::FetchAlbumArt(url.clone()));
+      }
+    }
   }
 
 }

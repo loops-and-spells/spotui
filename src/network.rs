@@ -74,6 +74,7 @@ pub enum IoEvent {
   GetCurrentUserSavedShows(Option<u32>),
   GetTopTracks,
   GetTopArtists,
+  FetchAlbumArt(String),
 }
 
 // Compatibility types
@@ -277,6 +278,9 @@ impl Network {
       IoEvent::GetTopArtists => {
         self.get_top_artists().await;
       }
+      IoEvent::FetchAlbumArt(url) => {
+        self.fetch_album_art(url).await;
+      }
       // Add more handlers as needed
       _ => {
         // Unhandled network event
@@ -358,6 +362,9 @@ impl Network {
         
         // Store the playback context  
         app.current_playback_context = Some(context);
+        
+        // Update album art for the current track
+        app.update_album_art();
         
         // Reset polling state
         app.is_fetching_current_playback = false;
@@ -1413,6 +1420,30 @@ impl Network {
         self.log_error(&format!("ERROR getting artist: {:?}", e));
         let mut app = self.app.lock().await;
         app.handle_error(anyhow::anyhow!("Failed to load artist: {}", e));
+      }
+    }
+  }
+
+  async fn fetch_album_art(&mut self, url: String) {
+    let mut app = self.app.lock().await;
+    
+    // Get idle mode state before borrowing manager
+    let is_idle = app.is_idle_mode;
+    
+    if let Some(manager) = &mut app.album_art_manager {
+      // Use different sizes based on idle mode
+      let size = if is_idle { 96 } else { 16 };
+      
+      match manager.get_album_art(&url, size).await {
+        Ok(art) => {
+          app.current_album_art = Some(art);
+          app.add_log_message(format!("Successfully fetched album art ({}x{}) from: {}", size, size, url));
+        }
+        Err(e) => {
+          app.add_log_message(format!("Failed to fetch album art: {}", e));
+          // Use placeholder art on failure
+          app.current_album_art = Some(crate::album_art::AlbumArtManager::get_placeholder_art(size));
+        }
       }
     }
   }

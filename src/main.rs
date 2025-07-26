@@ -1,4 +1,5 @@
 mod app;
+mod album_art;
 mod banner;
 // mod cli;  // TODO: Re-enable after fixing clap compatibility
 mod config;
@@ -435,21 +436,28 @@ async fn start_ui(user_config: UserConfig, app: &Arc<Mutex<App>>) -> Result<()> 
     };
 
     let current_route = app.get_current_route();
-    terminal.draw(|mut f| match current_route.active_block {
-      ActiveBlock::SelectDevice => {
-        ui::draw_device_list(&mut f, &app);
-      }
-      ActiveBlock::Analysis => {
-        ui::audio_analysis::draw(&mut f, &app);
-      }
-      ActiveBlock::BasicView => {
-        ui::draw_basic_view(&mut f, &app);
-      }
-      ActiveBlock::LogStream => {
-        ui::draw_log_stream_full_screen(&mut f, &app);
-      }
-      _ => {
-        ui::draw_main_layout(&mut f, &app);
+    terminal.draw(|mut f| {
+      // Check for idle mode first
+      if app.is_idle_mode {
+        ui::draw_idle_mode(&mut f, &app);
+      } else {
+        match current_route.active_block {
+          ActiveBlock::SelectDevice => {
+            ui::draw_device_list(&mut f, &app);
+          }
+          ActiveBlock::Analysis => {
+            ui::audio_analysis::draw(&mut f, &app);
+          }
+          ActiveBlock::BasicView => {
+            ui::draw_basic_view(&mut f, &app);
+          }
+          ActiveBlock::LogStream => {
+            ui::draw_log_stream_full_screen(&mut f, &app);
+          }
+          _ => {
+            ui::draw_main_layout(&mut f, &app);
+          }
+        }
       }
     })?;
 
@@ -480,6 +488,9 @@ async fn start_ui(user_config: UserConfig, app: &Arc<Mutex<App>>) -> Result<()> 
 
     match events.next()? {
       event::Event::Input(key) => {
+        // Reset idle timer on any user input
+        app.reset_idle_timer();
+        
         if key == Key::Ctrl('c') {
           break;
         }
@@ -507,6 +518,9 @@ async fn start_ui(user_config: UserConfig, app: &Arc<Mutex<App>>) -> Result<()> 
       }
       event::Event::Tick => {
         app.update_on_tick();
+        // Check if we should enter idle mode
+        let idle_timeout = app.user_config.behavior.idle_timeout_seconds;
+        app.check_idle_mode(idle_timeout);
       }
     }
 

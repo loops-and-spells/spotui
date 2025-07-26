@@ -190,18 +190,15 @@ pub fn draw_main_layout(f: &mut Frame, app: &App) {
   if app.size.width >= SMALL_TERMINAL_WIDTH && !app.user_config.behavior.enforce_wide_search_bar {
     let parent_layout = Layout::default()
       .direction(Direction::Vertical)
-      .constraints([Constraint::Min(1), Constraint::Length(6), Constraint::Length(5)].as_ref())
+      .constraints([Constraint::Min(1), Constraint::Length(8)].as_ref())
       .margin(margin)
       .split(f.area());
 
     // Nested main block with potential routes
     draw_routes::<CrosstermBackend<std::io::Stdout>>(f, app, parent_layout[0]);
 
-    // Currently playing
+    // Currently playing (now taller)
     draw_playbar::<CrosstermBackend<std::io::Stdout>>(f, app, parent_layout[1]);
-
-    // Log stream
-    draw_log_stream::<CrosstermBackend<std::io::Stdout>>(f, app, parent_layout[2]);
   } else {
     let parent_layout = Layout::default()
       .direction(Direction::Vertical)
@@ -209,8 +206,7 @@ pub fn draw_main_layout(f: &mut Frame, app: &App) {
         [
           Constraint::Length(3),
           Constraint::Min(1),
-          Constraint::Length(6),
-          Constraint::Length(5),
+          Constraint::Length(8),
         ]
         .as_ref(),
       )
@@ -223,11 +219,8 @@ pub fn draw_main_layout(f: &mut Frame, app: &App) {
     // Nested main block with potential routes
     draw_routes::<CrosstermBackend<std::io::Stdout>>(f, app, parent_layout[1]);
 
-    // Currently playing
+    // Currently playing (now taller)
     draw_playbar::<CrosstermBackend<std::io::Stdout>>(f, app, parent_layout[2]);
-
-    // Log stream
-    draw_log_stream::<CrosstermBackend<std::io::Stdout>>(f, app, parent_layout[3]);
   }
 
   // Possibly draw confirm dialog
@@ -938,6 +931,30 @@ pub fn draw_basic_view(f: &mut Frame, app: &App) {
 
 pub fn draw_playbar<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
 {
+  // First split horizontally to make room for album art
+  let horizontal_chunks = Layout::default()
+    .direction(Direction::Horizontal)
+    .constraints(
+      if app.current_album_art.is_some() {
+        [Constraint::Length(20), Constraint::Min(1)].as_ref()
+      } else {
+        [Constraint::Min(1)].as_ref()
+      }
+    )
+    .split(layout_chunk);
+
+  // If we have album art, draw it in the left chunk
+  if app.current_album_art.is_some() {
+    draw_album_art(f, app, horizontal_chunks[0]);
+  }
+
+  // Use the right chunk (or full area if no art) for the playbar
+  let playbar_chunk = if app.current_album_art.is_some() {
+    horizontal_chunks[1]
+  } else {
+    horizontal_chunks[0]
+  };
+
   let chunks = Layout::default()
     .direction(Direction::Vertical)
     .constraints(
@@ -949,7 +966,7 @@ pub fn draw_playbar<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
       .as_ref(),
     )
     .margin(1)
-    .split(layout_chunk);
+    .split(playbar_chunk);
 
   // If no track is playing, render paragraph showing which device is selected, if no selected
   // give hint to choose a device
@@ -2014,4 +2031,190 @@ pub fn draw_log_stream_full_screen(f: &mut Frame, app: &App) {
 
   // Use the existing log stream drawing function for the main content
   draw_log_stream::<CrosstermBackend<std::io::Stdout>>(f, app, chunks[1]);
+}
+
+fn draw_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) {
+  if let Some(art) = &app.current_album_art {
+    // Create a block for the album art
+    let block = Block::default()
+      .borders(Borders::ALL)
+      .border_type(BorderType::Rounded)
+      .border_style(Style::default().fg(app.user_config.theme.inactive));
+    
+    let inner_area = block.inner(layout_chunk);
+    f.render_widget(block, layout_chunk);
+    
+    // Convert pixelated art to colored text
+    let lines = crate::album_art::render_pixelated_art(art);
+    
+    // Calculate centering offsets
+    let y_offset = inner_area.height.saturating_sub(lines.len() as u16) / 2;
+    let x_offset = inner_area.width.saturating_sub(art.width as u16) / 2;
+    
+    // Render each line of pixels
+    for (y, line) in lines.iter().enumerate() {
+      let y_pos = inner_area.y + y_offset + y as u16;
+      if y_pos >= inner_area.y + inner_area.height {
+        break;
+      }
+      
+      for (x, (ch, color)) in line.iter().enumerate() {
+        let x_pos = inner_area.x + x_offset + x as u16;
+        if x_pos >= inner_area.x + inner_area.width {
+          break;
+        }
+        
+        // Render each pixel as a colored block
+        let pixel = Span::styled(ch, Style::default().fg(*color));
+        let paragraph = Paragraph::new(pixel);
+        let pixel_area = Rect {
+          x: x_pos,
+          y: y_pos,
+          width: 1,
+          height: 1,
+        };
+        f.render_widget(paragraph, pixel_area);
+      }
+    }
+  }
+}
+
+/// Draw the idle mode screensaver with large album art
+pub fn draw_idle_mode(f: &mut Frame, app: &App) {
+  // Split the screen into vertical sections
+  let chunks = Layout::default()
+    .direction(Direction::Vertical)
+    .constraints([
+      Constraint::Percentage(10),  // Top margin
+      Constraint::Percentage(80),  // Album art area
+      Constraint::Percentage(10),  // Bottom area for progress bar
+    ].as_ref())
+    .split(f.area());
+
+  // Draw large album art in the center
+  if app.current_album_art.is_some() {
+    // Split horizontally to center the album art
+    let horizontal_chunks = Layout::default()
+      .direction(Direction::Horizontal)
+      .constraints([
+        Constraint::Percentage(10),
+        Constraint::Percentage(80),
+        Constraint::Percentage(10),
+      ].as_ref())
+      .split(chunks[1]);
+
+    // Draw the album art in the center chunk
+    draw_large_album_art(f, app, horizontal_chunks[1]);
+  }
+
+  // Draw progress bar at the bottom
+  if let Some(context) = &app.current_playback_context {
+    if let Some(item) = &context.item {
+      let progress_chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+          Constraint::Percentage(50),
+          Constraint::Percentage(50),
+        ].as_ref())
+        .margin(2)
+        .split(chunks[2]);
+
+      // Draw track info
+      let track_info = match item {
+        PlayableItem::Track(track) => {
+          format!("{} - {}", track.name, create_artist_string(&track.artists))
+        }
+        PlayableItem::Episode(episode) => episode.name.clone(),
+      };
+
+      let track_paragraph = Paragraph::new(track_info)
+        .style(Style::default().fg(app.user_config.theme.selected))
+        .alignment(Alignment::Center);
+      f.render_widget(track_paragraph, progress_chunks[0]);
+
+      // Draw progress bar
+      let (progress_ms, duration_ms) = match item {
+        PlayableItem::Track(track) => {
+          let duration = track.duration.num_milliseconds() as u32;
+          let progress = context.progress
+            .map(|p| p.num_milliseconds() as u32)
+            .unwrap_or(0);
+          (progress, duration)
+        }
+        PlayableItem::Episode(episode) => {
+          let duration = episode.duration.num_milliseconds() as u32;
+          let progress = context.progress
+            .map(|p| p.num_milliseconds() as u32)
+            .unwrap_or(0);
+          (progress, duration)
+        }
+      };
+      
+      let progress_perc = get_track_progress_percentage(progress_ms as u128, duration_ms);
+      let progress_ratio = f64::from(progress_perc) / 100.0;
+      
+      let progress_bar = Gauge::default()
+        .block(Block::default().borders(Borders::NONE))
+        .gauge_style(Style::default()
+          .fg(app.user_config.theme.selected)
+          .bg(app.user_config.theme.inactive))
+        .ratio(progress_ratio);
+      f.render_widget(progress_bar, progress_chunks[1]);
+    }
+  }
+}
+
+/// Draw large album art for idle mode
+fn draw_large_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) {
+  if let Some(art) = &app.current_album_art {
+    // Create a block for the album art
+    let block = Block::default()
+      .borders(Borders::ALL)
+      .border_type(BorderType::Rounded)
+      .border_style(Style::default().fg(app.user_config.theme.inactive));
+    
+    let inner_area = block.inner(layout_chunk);
+    f.render_widget(block, layout_chunk);
+    
+    // For large display, render with double-width characters
+    let mut lines = Vec::new();
+    for row in &art.pixels {
+      let mut line = Vec::new();
+      for pixel in row {
+        // Use double-width block for screensaver mode
+        line.push(("██".to_string(), pixel.to_ratatui_color()));
+      }
+      lines.push(line);
+    }
+    
+    // Calculate centering offsets (accounting for double-width)
+    let y_offset = inner_area.height.saturating_sub(lines.len() as u16) / 2;
+    let x_offset = inner_area.width.saturating_sub(art.width as u16 * 2) / 2;
+    
+    // Render each line of pixels
+    for (y, line) in lines.iter().enumerate() {
+      let y_pos = inner_area.y + y_offset + y as u16;
+      if y_pos >= inner_area.y + inner_area.height {
+        break;
+      }
+      
+      for (x, (ch, color)) in line.iter().enumerate() {
+        let x_pos = inner_area.x + x_offset + (x as u16 * 2);
+        if x_pos + 2 > inner_area.x + inner_area.width {
+          break;
+        }
+        
+        // Render each pixel as a colored block
+        let pixel = Span::styled(ch, Style::default().fg(*color));
+        let paragraph = Paragraph::new(pixel);
+        let pixel_area = Rect {
+          x: x_pos,
+          y: y_pos,
+          width: 2,
+          height: 1,
+        };
+        f.render_widget(paragraph, pixel_area);
+      }
+    }
+  }
 }

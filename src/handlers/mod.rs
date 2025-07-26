@@ -27,6 +27,7 @@ use crate::focus_manager::ComponentId;
 use crate::network::IoEvent;
 use rspotify::model::{context::CurrentPlaybackContext, PlayableItem};
 use crate::network::PlayingItem;
+use std::time::Instant;
 
 pub use input::handler as input_handler;
 
@@ -57,6 +58,29 @@ pub fn handle_app(key: Key, app: &mut App) {
     }
     Key::Char('O') => {
       app.push_navigation_stack(RouteId::LogStream, ActiveBlock::LogStream);
+    }
+    Key::Ctrl('l') => {
+      app.push_navigation_stack(RouteId::LogStream, ActiveBlock::LogStream);
+    }
+    Key::Char('F') | Key::Char('f') => {
+      // Toggle fullscreen/idle mode
+      app.is_idle_mode = !app.is_idle_mode;
+      // Reset idle timer to prevent automatic idle mode from interfering
+      app.last_user_interaction = Instant::now();
+      
+      if app.is_idle_mode {
+        // Fetch larger album art for idle mode
+        if let Some(url) = &app.current_album_art_url {
+          app.dispatch(IoEvent::FetchAlbumArt(url.clone()));
+        }
+        app.add_log_message("Entered fullscreen album art mode".to_string());
+      } else {
+        // Fetch smaller album art for normal mode
+        if let Some(url) = &app.current_album_art_url {
+          app.dispatch(IoEvent::FetchAlbumArt(url.clone()));
+        }
+        app.add_log_message("Exited fullscreen album art mode".to_string());
+      }
     }
     _ if key == app.user_config.keys.jump_to_album => {
       handle_jump_to_album(app);
