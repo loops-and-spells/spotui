@@ -6,30 +6,9 @@ use crate::event::Key;
 use crate::network::{IoEvent, PlayingItem};
 use rspotify::model::{context::CurrentPlaybackContext, PlayableItem};
 
-pub fn handler(key: Key, app: &mut App) {
-  match key {
-    k if common_key_events::up_event(k) => {
-      app.set_current_route_state(Some(ActiveBlock::Empty), Some(ActiveBlock::MyPlaylists));
-    }
-    Key::Char('s') => {
-      if let Some(CurrentPlaybackContext {
-        item: Some(item), ..
-      }) = app.current_playback_context.to_owned()
-      {
-        match item {
-          PlayableItem::Track(track) => {
-            if let Some(track_id) = track.id {
-              app.dispatch(IoEvent::ToggleSaveTrack(track_id.to_string()));
-            }
-          }
-          PlayableItem::Episode(episode) => {
-            app.dispatch(IoEvent::ToggleSaveTrack(episode.id.to_string()));
-          }
-        };
-      };
-    }
-    _ => {}
-  };
+pub fn handler(_key: Key, app: &mut App) {
+  // PlayBar is no longer keyboard navigable - immediately move focus away
+  app.set_current_route_state(Some(ActiveBlock::Empty), Some(ActiveBlock::MyPlaylists));
 }
 
 #[cfg(test)]

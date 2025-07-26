@@ -1011,20 +1011,14 @@ pub fn draw_playbar<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
         current_playback_context.device.volume_percent.unwrap_or(0)
       );
 
-      let current_route = app.get_current_route();
-      let highlight_state = (
-        current_route.active_block == ActiveBlock::PlayBar,
-        current_route.hovered_block == ActiveBlock::PlayBar,
-      );
-
       let title_block = Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .title(Span::styled(
           &title,
-          get_color(highlight_state, app.user_config.theme),
+          Style::default().fg(app.user_config.theme.inactive),
         ))
-        .border_style(get_color(highlight_state, app.user_config.theme));
+        .border_style(Style::default().fg(app.user_config.theme.inactive));
 
       f.render_widget(title_block, layout_chunk);
 
@@ -1052,25 +1046,176 @@ pub fn draw_playbar<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
         PlayableItem::Episode(episode) => format!("{}", episode.name), // Note: episode.show not available in newer API
       };
 
-      let lines = Text::from(Span::styled(
-        play_bar_text.clone(),
-        Style::default().fg(app.user_config.theme.playbar_text),
-      ));
+      // Create play control buttons layout - two rows
+      let control_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+          Constraint::Percentage(50), // Main controls
+          Constraint::Percentage(50), // Secondary controls
+        ].as_ref())
+        .split(chunks[0]);
 
-      let artist = Paragraph::new(lines)
+      // Top row: Previous, Play/Pause, Next
+      let top_controls = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+          Constraint::Percentage(33), // Previous
+          Constraint::Percentage(34), // Play/Pause
+          Constraint::Percentage(33), // Next
+        ].as_ref())
+        .split(control_rows[0]);
+
+      // Bottom row: Seek Back, Shuffle, Repeat, Seek Forward
+      let bottom_controls = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+          Constraint::Percentage(25), // Seek back
+          Constraint::Percentage(25), // Shuffle
+          Constraint::Percentage(25), // Repeat
+          Constraint::Percentage(25), // Seek forward
+        ].as_ref())
+        .split(control_rows[1]);
+
+      // Previous button
+      let prev_button = Paragraph::new("⏮")
         .style(Style::default().fg(app.user_config.theme.playbar_text))
+        .alignment(Alignment::Center)
         .block(
           Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Rounded)
             .title(Span::styled(
-              &track_name,
-              Style::default()
-                .fg(app.user_config.theme.selected)
-                .add_modifier(Modifier::BOLD),
+              "B",
+              Style::default().fg(app.user_config.theme.inactive),
             ))
         );
-      f.render_widget(artist, chunks[0]);
+      f.render_widget(prev_button, top_controls[0]);
+
+      // Play/Pause button
+      let play_pause_icon = if current_playback_context.is_playing { "⏸" } else { "▶" };
+      let play_pause_color = if current_playback_context.is_playing {
+        app.user_config.theme.active
+      } else {
+        app.user_config.theme.playbar_text
+      };
+      let play_pause_button = Paragraph::new(play_pause_icon)
+        .style(Style::default().fg(play_pause_color))
+        .alignment(Alignment::Center)
+        .block(
+          Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(Span::styled(
+              "SPACE",
+              Style::default().fg(app.user_config.theme.inactive),
+            ))
+            .border_style(Style::default().fg(app.user_config.theme.inactive))
+        );
+      f.render_widget(play_pause_button, top_controls[1]);
+
+      // Next button
+      let next_button = Paragraph::new("⏭")
+        .style(Style::default().fg(app.user_config.theme.playbar_text))
+        .alignment(Alignment::Center)
+        .block(
+          Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(Span::styled(
+              "N",
+              Style::default().fg(app.user_config.theme.inactive),
+            ))
+        );
+      f.render_widget(next_button, top_controls[2]);
+
+      // Shuffle button
+      let shuffle_active = current_playback_context.shuffle_state;
+      let shuffle_color = if shuffle_active {
+        app.user_config.theme.active
+      } else {
+        app.user_config.theme.playbar_text
+      };
+      let shuffle_border_color = if shuffle_active {
+        app.user_config.theme.active
+      } else {
+        app.user_config.theme.inactive
+      };
+      let shuffle_button = Paragraph::new("🔀")
+        .style(Style::default().fg(shuffle_color))
+        .alignment(Alignment::Center)
+        .block(
+          Block::default()
+            .borders(Borders::ALL)
+            .border_type(if shuffle_active { BorderType::Double } else { BorderType::Rounded })
+            .title(Span::styled(
+              "CTRL+S",
+              Style::default().fg(app.user_config.theme.inactive),
+            ))
+            .border_style(Style::default().fg(shuffle_border_color))
+        );
+      f.render_widget(shuffle_button, bottom_controls[1]);
+
+      // Repeat button
+      let repeat_icon = match current_playback_context.repeat_state {
+        SpotifyRepeatState::Track => "🔂",
+        SpotifyRepeatState::Context => "🔁",
+        SpotifyRepeatState::Off => "🔁",
+      };
+      let repeat_active = !matches!(current_playback_context.repeat_state, SpotifyRepeatState::Off);
+      let repeat_color = if repeat_active {
+        app.user_config.theme.active
+      } else {
+        app.user_config.theme.playbar_text
+      };
+      let repeat_border_color = if repeat_active {
+        app.user_config.theme.active
+      } else {
+        app.user_config.theme.inactive
+      };
+      let repeat_button = Paragraph::new(repeat_icon)
+        .style(Style::default().fg(repeat_color))
+        .alignment(Alignment::Center)
+        .block(
+          Block::default()
+            .borders(Borders::ALL)
+            .border_type(if repeat_active { BorderType::Double } else { BorderType::Rounded })
+            .title(Span::styled(
+              "CTRL+R",
+              Style::default().fg(app.user_config.theme.inactive),
+            ))
+            .border_style(Style::default().fg(repeat_border_color))
+        );
+      f.render_widget(repeat_button, bottom_controls[2]);
+
+      // Seek backward button
+      let seek_back_button = Paragraph::new("◀◀")
+        .style(Style::default().fg(app.user_config.theme.playbar_text))
+        .alignment(Alignment::Center)
+        .block(
+          Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(Span::styled(
+              "<",
+              Style::default().fg(app.user_config.theme.inactive),
+            ))
+        );
+      f.render_widget(seek_back_button, bottom_controls[0]);
+
+      // Seek forward button
+      let seek_forward_button = Paragraph::new("▶▶")
+        .style(Style::default().fg(app.user_config.theme.playbar_text))
+        .alignment(Alignment::Center)
+        .block(
+          Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(Span::styled(
+              ">",
+              Style::default().fg(app.user_config.theme.inactive),
+            ))
+        );
+      f.render_widget(seek_forward_button, bottom_controls[3]);
 
       let progress_ms = match app.seek_ms {
         Some(seek_ms) => seek_ms,
@@ -1101,7 +1246,16 @@ pub fn draw_playbar<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
           progress_label,
           Style::default().fg(text_color).add_modifier(Modifier::BOLD),
         ));
-      f.render_widget(song_progress, chunks[1]);
+      // Add horizontal margin to the progress bar
+      let progress_area = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+          Constraint::Min(0),      // Left side takes remaining space
+          Constraint::Length(1),   // Right margin of 1 unit
+        ].as_ref())
+        .split(chunks[1]);
+      
+      f.render_widget(song_progress, progress_area[0]);
     } else {
       // Clear the playbar area when no track is playing
       let device_text = format!(
@@ -2336,8 +2490,10 @@ fn draw_fullscreen_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) -> (C
     
     // Calculate the maximum size we can display
     // Account for double-width characters (2:1 aspect ratio)
-    let available_width = layout_chunk.width / 2;  // Divide by 2 for double-width chars
-    let available_height = layout_chunk.height;
+    // Reduce size to make room for shadow and spacing from playbar
+    let shadow_space = 4; // Space needed for shadow (2 pixels) + gap from playbar (2 pixels)
+    let available_width = (layout_chunk.width / 2).saturating_sub(shadow_space);  // Divide by 2 for double-width chars
+    let available_height = layout_chunk.height.saturating_sub(shadow_space);
     
     // Determine the size to use (maintain square aspect ratio)
     let display_size = available_width.min(available_height) as u32;
@@ -2345,19 +2501,68 @@ fn draw_fullscreen_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) -> (C
     // Calculate actual pixel size based on the original art size
     let scale_factor = display_size as f32 / art.width as f32;
     
-    // Center the art in the available space
-    let x_offset = (layout_chunk.width.saturating_sub(display_size as u16 * 2)) / 2;
-    let y_offset = (layout_chunk.height.saturating_sub(display_size as u16)) / 2;
+    // Center the art in the available space (accounting for shadow)
+    let total_width = (display_size as u16 + 1) * 2; // +1 for shadow on right
+    let total_height = display_size as u16 + 1; // +1 for shadow on bottom
+    let x_offset = (layout_chunk.width.saturating_sub(total_width)) / 2;
+    let y_offset = (layout_chunk.height.saturating_sub(total_height)) / 2;
     
-    // Render the album art scaled to fit
+    // The art itself doesn't need additional offset since we've already accounted for shadow
+    let inset_x_offset = x_offset;
+    let inset_y_offset = y_offset;
+    
+    // Draw drop shadow - only on right and bottom edges
+    // Right edge shadow
     for y in 0..display_size {
-      let y_pos = layout_chunk.y + y_offset + y as u16;
+      let y_pos = layout_chunk.y + inset_y_offset + y as u16;
+      if y_pos >= layout_chunk.y + layout_chunk.height {
+        break;
+      }
+      
+      let x_pos = layout_chunk.x + inset_x_offset + (display_size as u16 * 2);
+      if x_pos + 2 <= layout_chunk.x + layout_chunk.width {
+        let pixel = Span::styled("██", Style::default().fg(Color::Black));
+        let paragraph = Paragraph::new(pixel);
+        let pixel_area = Rect {
+          x: x_pos,
+          y: y_pos,
+          width: 2,
+          height: 1,
+        };
+        f.render_widget(paragraph, pixel_area);
+      }
+    }
+    
+    // Bottom edge shadow
+    let y_pos = layout_chunk.y + inset_y_offset + display_size as u16;
+    if y_pos < layout_chunk.y + layout_chunk.height {
+      for x in 0..=display_size {
+        let x_pos = layout_chunk.x + inset_x_offset + (x as u16 * 2);
+        if x_pos + 2 > layout_chunk.x + layout_chunk.width {
+          break;
+        }
+        
+        let pixel = Span::styled("██", Style::default().fg(Color::Black));
+        let paragraph = Paragraph::new(pixel);
+        let pixel_area = Rect {
+          x: x_pos,
+          y: y_pos,
+          width: 2,
+          height: 1,
+        };
+        f.render_widget(paragraph, pixel_area);
+      }
+    }
+    
+    // Re-render the album art on top (inset)
+    for y in 0..display_size {
+      let y_pos = layout_chunk.y + inset_y_offset + y as u16;
       if y_pos >= layout_chunk.y + layout_chunk.height {
         break;
       }
       
       for x in 0..display_size {
-        let x_pos = layout_chunk.x + x_offset + (x as u16 * 2);
+        let x_pos = layout_chunk.x + inset_x_offset + (x as u16 * 2);
         if x_pos + 2 > layout_chunk.x + layout_chunk.width {
           break;
         }
@@ -2381,6 +2586,122 @@ fn draw_fullscreen_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) -> (C
           };
           f.render_widget(paragraph, pixel_area);
         }
+      }
+    }
+    
+    // Now add fade/blur effect around the edges
+    let fade_width = 20; // Number of columns to fade on each side
+    
+    // Extract background RGB values
+    let (bg_r, bg_g, bg_b) = match darkest_color {
+      Color::Rgb(r, g, b) => (r, g, b),
+      _ => (0, 0, 0),
+    };
+    
+    // Sample edge colors from the art for blending
+    let left_edge_y = display_size / 2;
+    let right_edge_y = display_size / 2;
+    
+    let (left_edge_r, left_edge_g, left_edge_b) = if (left_edge_y as usize) < art.pixels.len() && 0 < art.pixels[left_edge_y as usize].len() {
+      match art.pixels[left_edge_y as usize][0].to_ratatui_color() {
+        Color::Rgb(r, g, b) => (r, g, b),
+        _ => (bg_r, bg_g, bg_b),
+      }
+    } else {
+      (bg_r, bg_g, bg_b)
+    };
+    
+    let right_edge_x = (display_size - 1) as f32 / scale_factor;
+    let (right_edge_r, right_edge_g, right_edge_b) = if (right_edge_y as usize) < art.pixels.len() && (right_edge_x as usize) < art.pixels[right_edge_y as usize].len() {
+      match art.pixels[right_edge_y as usize][right_edge_x as usize].to_ratatui_color() {
+        Color::Rgb(r, g, b) => (r, g, b),
+        _ => (bg_r, bg_g, bg_b),
+      }
+    } else {
+      (bg_r, bg_g, bg_b)
+    };
+    
+    // Draw left fade with blur effect
+    for y in 0..display_size {
+      let y_pos = layout_chunk.y + inset_y_offset + y as u16;
+      if y_pos >= layout_chunk.y + layout_chunk.height {
+        break;
+      }
+      
+      // Sample color from this row's left edge
+      let src_y = (y as f32 / scale_factor) as usize;
+      let (edge_r, edge_g, edge_b) = if src_y < art.pixels.len() && 0 < art.pixels[src_y].len() {
+        match art.pixels[src_y][0].to_ratatui_color() {
+          Color::Rgb(r, g, b) => (r, g, b),
+          _ => (left_edge_r, left_edge_g, left_edge_b),
+        }
+      } else {
+        (left_edge_r, left_edge_g, left_edge_b)
+      };
+      
+      for fade_x in 0..fade_width {
+        let x_pos = layout_chunk.x + inset_x_offset.saturating_sub(fade_x as u16 * 2 + 2);
+        if x_pos < layout_chunk.x {
+          continue;
+        }
+        
+        // Calculate fade alpha
+        let fade_alpha = (fade_x as f32 / fade_width as f32).powf(1.5);
+        
+        // Blend from edge color to background
+        let blended_r = (edge_r as f32 * (1.0 - fade_alpha) + bg_r as f32 * fade_alpha) as u8;
+        let blended_g = (edge_g as f32 * (1.0 - fade_alpha) + bg_g as f32 * fade_alpha) as u8;
+        let blended_b = (edge_b as f32 * (1.0 - fade_alpha) + bg_b as f32 * fade_alpha) as u8;
+        
+        let gradient_color = Color::Rgb(blended_r, blended_g, blended_b);
+        
+        let pixel = Span::styled("██", Style::default().fg(gradient_color));
+        let paragraph = Paragraph::new(pixel);
+        let pixel_area = Rect {
+          x: x_pos,
+          y: y_pos,
+          width: 2,
+          height: 1,
+        };
+        f.render_widget(paragraph, pixel_area);
+      }
+      
+      // Right fade with blur effect
+      let src_x = ((display_size - 1) as f32 / scale_factor) as usize;
+      let (edge_r, edge_g, edge_b) = if src_y < art.pixels.len() && src_x < art.pixels[src_y].len() {
+        match art.pixels[src_y][src_x].to_ratatui_color() {
+          Color::Rgb(r, g, b) => (r, g, b),
+          _ => (right_edge_r, right_edge_g, right_edge_b),
+        }
+      } else {
+        (right_edge_r, right_edge_g, right_edge_b)
+      };
+      
+      for fade_x in 0..fade_width {
+        let x_pos = layout_chunk.x + inset_x_offset + (display_size as u16 * 2) + (fade_x as u16 * 2);
+        if x_pos + 2 > layout_chunk.x + layout_chunk.width {
+          break;
+        }
+        
+        // Calculate fade alpha
+        let fade_alpha = (fade_x as f32 / fade_width as f32).powf(1.5);
+        
+        // Blend from edge color to background
+        let blended_r = (edge_r as f32 * (1.0 - fade_alpha) + bg_r as f32 * fade_alpha) as u8;
+        let blended_g = (edge_g as f32 * (1.0 - fade_alpha) + bg_g as f32 * fade_alpha) as u8;
+        let blended_b = (edge_b as f32 * (1.0 - fade_alpha) + bg_b as f32 * fade_alpha) as u8;
+        
+        let gradient_color = Color::Rgb(blended_r, blended_g, blended_b);
+        
+        let pixel = Span::styled("██", Style::default().fg(gradient_color));
+        let paragraph = Paragraph::new(pixel);
+        let pixel_area = Rect {
+          x: x_pos,
+          y: y_pos,
+          width: 2,
+          height: 1,
+        };
+        f.render_widget(paragraph, pixel_area);
       }
     }
     

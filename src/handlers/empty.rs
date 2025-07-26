@@ -25,16 +25,14 @@ pub fn handler(key: Key, app: &mut App) {
       | ActiveBlock::MyPlaylists
       | ActiveBlock::RecentlyPlayed
       | ActiveBlock::TrackTable => {
-        app.set_current_route_state(None, Some(ActiveBlock::PlayBar));
+        // Skip PlayBar - it's not keyboard navigable
+        app.set_current_route_state(None, Some(ActiveBlock::MyPlaylists));
       }
       _ => {}
     },
     k if common_key_events::up_event(k) => match app.get_current_route().hovered_block {
       ActiveBlock::MyPlaylists => {
         app.set_current_route_state(None, Some(ActiveBlock::Library));
-      }
-      ActiveBlock::PlayBar => {
-        app.set_current_route_state(None, Some(ActiveBlock::MyPlaylists));
       }
       _ => {}
     },

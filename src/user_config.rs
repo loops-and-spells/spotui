@@ -277,7 +277,7 @@ impl UserConfig {
         seek_backwards: Key::Char('<'),
         seek_forwards: Key::Char('>'),
         next_track: Key::Char('n'),
-        previous_track: Key::Char('p'),
+        previous_track: Key::Char('b'),
         shuffle: Key::Ctrl('s'),
         repeat: Key::Ctrl('r'),
         search: Key::Char('/'),
