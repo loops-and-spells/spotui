@@ -9,7 +9,7 @@ use rspotify::{
   AuthCodeSpotify,
   clients::{BaseClient, OAuthClient},
   model::{
-    album::SimplifiedAlbum,
+    album::{SimplifiedAlbum, FullAlbum},
     artist::FullArtist,
     page::Page,
     playlist::SimplifiedPlaylist,
@@ -240,6 +240,12 @@ impl Network {
         // TODO: Implement get show episodes
         // TODO: Implement GetShowEpisodes
       }
+      IoEvent::GetArtist(artist_id) => {
+        self.get_artist(artist_id).await;
+      }
+      IoEvent::GetAlbumTracks(album_id) => {
+        self.get_album_tracks(album_id).await;
+      }
       IoEvent::GetAlbum(album_id) => {
         // TODO: Implement get album
         // TODO: Implement GetAlbum
@@ -423,6 +429,101 @@ impl Network {
     app.track_table.tracks = tracks;
     app.track_table.context = Some(TrackTableContext::MyPlaylists);
     app.track_table.selected_index = 0;
+  }
+
+  async fn get_album_tracks(&mut self, album_id: String) {
+    use rspotify::model::AlbumId;
+    use futures::TryStreamExt;
+    
+    self.log_error(&format!("DEBUG: get_album_tracks called with ID: '{}'", album_id));
+    
+    // Extract just the ID from the Spotify URI if present
+    let id_part = if album_id.starts_with("spotify:album:") {
+      &album_id[14..] // Skip "spotify:album:"
+    } else {
+      &album_id // Assume it's already just the ID
+    };
+    
+    let album_id = match AlbumId::from_id(id_part) {
+      Ok(id) => id,
+      Err(e) => {
+        let error_msg = format!("ERROR: Invalid album ID '{}' (extracted: '{}'): {:?}", album_id, id_part, e);
+        self.log_error(&error_msg);
+        let mut app = self.app.lock().await;
+        app.handle_error(anyhow::anyhow!("Invalid album ID: {}", e));
+        return;
+      }
+    };
+    
+    // Get the album details first to get album name and other info
+    let album = match self.spotify.album(album_id.clone(), None).await {
+      Ok(album) => {
+        self.log_error(&format!("SUCCESS: Got album: {}", album.name));
+        album
+      }
+      Err(e) => {
+        let error_msg = format!("ERROR getting album details: {:?}", e);
+        self.log_error(&error_msg);
+        let mut app = self.app.lock().await;
+        app.handle_error(anyhow::anyhow!("Failed to get album: {}", e));
+        return;
+      }
+    };
+    
+    // Get album tracks using the stream API
+    let mut stream = self.spotify.album_track(album_id, None);
+    let mut tracks = Vec::new();
+    
+    while let Some(track) = stream.try_next().await.unwrap_or(None) {
+      // Convert SimplifiedTrack to FullTrack-like structure for the UI
+      tracks.push(FullTrack {
+        artists: track.artists,
+        available_markets: track.available_markets.clone().unwrap_or_default(),
+        disc_number: track.disc_number,
+        duration: track.duration,
+        explicit: track.explicit,
+        external_ids: Default::default(),
+        external_urls: track.external_urls,
+        href: track.href.clone(),
+        id: track.id,
+        is_local: track.is_local,
+        is_playable: track.is_playable,
+        linked_from: track.linked_from,
+        restrictions: track.restrictions,
+        name: track.name,
+        popularity: 0, // SimplifiedTrack doesn't have popularity
+        preview_url: track.preview_url,
+        track_number: track.track_number,
+        album: SimplifiedAlbum {
+          album_type: Some(format!("{:?}", album.album_type)),
+          artists: album.artists.clone(),
+          available_markets: album.available_markets.clone().unwrap_or_default(),
+          external_urls: album.external_urls.clone(),
+          href: Some(album.href.clone()),
+          id: Some(album.id.clone()),
+          images: album.images.clone(),
+          name: album.name.clone(),
+          release_date: Some(album.release_date.clone()),
+          release_date_precision: Some(format!("{:?}", album.release_date_precision)),
+          restrictions: None,
+          album_group: None,
+        },
+      });
+    }
+    
+    self.log_error(&format!("SUCCESS: Got {} tracks from album", tracks.len()));
+    
+    let mut app = self.app.lock().await;
+    // Store album tracks in app.track_table for display
+    app.track_table.tracks = tracks;
+    app.track_table.context = Some(TrackTableContext::AlbumSearch);
+    app.track_table.selected_index = 0;
+    
+    // Store the album URI for playback
+    app.selected_album_full = Some(SelectedFullAlbum {
+      album,
+      selected_index: 0,
+    });
   }
 
   async fn start_playback(&mut self, context_uri: Option<&str>, offset_uri: Option<String>) {
@@ -836,8 +937,25 @@ impl Network {
           }
         };
         
-        if let Err(e) = self.spotify.write_token_cache().await {
-          // Warning: Failed to update token cache
+        // Manually write the token cache
+        if let Ok(token_guard) = self.spotify.token.lock().await {
+          if let Some(token) = token_guard.as_ref() {
+            match serde_json::to_string_pretty(token) {
+              Ok(token_json) => {
+                match std::fs::write(&config_paths.token_cache_path, token_json) {
+                  Ok(_) => {
+                    self.log_error("Successfully updated token cache");
+                  }
+                  Err(e) => {
+                    self.log_error(&format!("Failed to write token cache file: {}", e));
+                  }
+                }
+              }
+              Err(e) => {
+                self.log_error(&format!("Failed to serialize token: {}", e));
+              }
+            }
+          }
         }
         
         // Update app token expiry
@@ -1064,6 +1182,115 @@ impl Network {
         self.log_error(&type_msg);
         let mut app = self.app.lock().await;
         app.handle_error(anyhow::anyhow!("Failed to load top artists: {}", e));
+      }
+    }
+  }
+
+  async fn get_artist(&mut self, artist_id: String) {
+    self.log_error(&format!("DEBUG: Starting get_artist for ID: {}", artist_id));
+    use rspotify::model::ArtistId;
+    use futures::{StreamExt, TryStreamExt};
+    
+    // Parse the artist ID from Spotify URI format if needed
+    let artist_id_str = if artist_id.starts_with("spotify:artist:") {
+      artist_id.replace("spotify:artist:", "")
+    } else {
+      artist_id
+    };
+    
+    // Create ArtistId from string
+    let artist_id = match ArtistId::from_id(&artist_id_str) {
+      Ok(id) => id,
+      Err(e) => {
+        self.log_error(&format!("ERROR parsing artist ID: {:?}", e));
+        let mut app = self.app.lock().await;
+        app.handle_error(anyhow::anyhow!("Invalid artist ID: {}", e));
+        return;
+      }
+    };
+    
+    match self.spotify.artist(artist_id.clone()).await {
+      Ok(full_artist) => {
+        self.log_error(&format!("SUCCESS: Got artist: {}", full_artist.name));
+        
+        // Get the artist's top tracks
+        let top_tracks = match self.spotify.artist_top_tracks(artist_id.clone(), None).await {
+          Ok(tracks) => {
+            self.log_error(&format!("Got {} top tracks for artist", tracks.len()));
+            tracks
+          }
+          Err(e) => {
+            self.log_error(&format!("ERROR getting artist top tracks: {:?}", e));
+            vec![]
+          }
+        };
+        
+        // Get the artist's albums using stream
+        let albums_stream = self.spotify.artist_albums(artist_id.clone(), None, None);
+        let albums_result: Result<Vec<_>, _> = albums_stream.take(50).try_collect().await;
+        
+        let albums = match albums_result {
+          Ok(items) => {
+            self.log_error(&format!("Got {} albums for artist", items.len()));
+            let total = items.len() as u32; // Capture length before move
+            Page {
+              href: String::new(),
+              items,
+              limit: 50,
+              next: None,
+              offset: 0,
+              previous: None,
+              total,
+            }
+          }
+          Err(e) => {
+            self.log_error(&format!("ERROR getting artist albums: {:?}", e));
+            Page {
+              href: String::new(),
+              items: vec![],
+              limit: 50,
+              next: None,
+              offset: 0,
+              previous: None,
+              total: 0,
+            }
+          }
+        };
+        
+        // Get related artists
+        let related_artists = match self.spotify.artist_related_artists(artist_id).await {
+          Ok(artists) => {
+            self.log_error(&format!("Got {} related artists", artists.len()));
+            artists
+          }
+          Err(e) => {
+            self.log_error(&format!("ERROR getting related artists: {:?}", e));
+            vec![]
+          }
+        };
+        
+        let mut app = self.app.lock().await;
+        
+        // Create the Artist struct
+        let artist_data = Artist {
+          artist_name: full_artist.name.clone(),
+          albums,
+          related_artists,
+          top_tracks,
+          selected_album_index: 0,
+          selected_related_artist_index: 0,
+          selected_top_track_index: 0,
+          artist_hovered_block: ArtistBlock::TopTracks,
+          artist_selected_block: ArtistBlock::Empty,
+        };
+        
+        app.artist = Some(artist_data);
+        app.add_log_message(format!("Loaded artist: {}", full_artist.name));
+      }
+      Err(e) => {
+        self.log_error(&format!("ERROR getting artist: {:?}", e));
+        let mut app = self.app.lock().await;
+        app.handle_error(anyhow::anyhow!("Failed to load artist: {}", e));
       }
     }
   }

@@ -79,24 +79,47 @@ pub async fn create_spotify_client(client_config: &ClientConfig) -> Result<AuthC
     ..Default::default()
   };
   
+  let paths = client_config.get_or_build_paths()?;
+  let cache_path = paths.token_cache_path.clone();
+  
+  // Set the environment variable for rspotify's token cache
+  std::env::set_var("RSPOTIFY_CACHE_PATH", cache_path.to_str().unwrap_or(""));
+  
   let mut spotify = AuthCodeSpotify::new(creds, oauth);
   
   // Try to load cached token first
-  let paths = client_config.get_or_build_paths()?;
-  if paths.token_cache_path.exists() {
-    match spotify.read_token_cache(false).await {
-      Ok(Some(token)) => {
-        *spotify.token.lock().await.unwrap() = Some(token);
-        println!("Loaded cached authentication token");
-        return Ok(spotify);
-      }
-      Ok(None) => {
-        println!("No valid cached token found, need to authenticate");
+  if cache_path.exists() {
+    println!("Checking for cached token at: {:?}", cache_path);
+    // Read the token file manually
+    match std::fs::read_to_string(&cache_path) {
+      Ok(token_json) => {
+        use rspotify::Token;
+        match serde_json::from_str::<Token>(&token_json) {
+          Ok(token) => {
+            *spotify.token.lock().await.unwrap() = Some(token);
+            println!("Loaded cached authentication token");
+            // Verify token is still valid
+            match spotify.current_user().await {
+              Ok(_) => {
+                println!("Token is valid, skipping authentication");
+                return Ok(spotify);
+              }
+              Err(_) => {
+                println!("Token expired, need to re-authenticate");
+              }
+            }
+          }
+          Err(e) => {
+            println!("Failed to parse cached token: {}", e);
+          }
+        }
       }
       Err(e) => {
-        println!("Error reading token cache: {}, will re-authenticate", e);
+        println!("Failed to read token cache file: {}", e);
       }
     }
+  } else {
+    println!("No token cache file found at: {:?}", cache_path);
   }
   
   // Perform OAuth flow
@@ -122,10 +145,29 @@ pub async fn create_spotify_client(client_config: &ClientConfig) -> Result<AuthC
   spotify.request_token(&code).await?;
   
   // Cache the token
-  if let Err(e) = spotify.write_token_cache().await {
-    println!("Warning: Failed to cache token: {}", e);
-  } else {
-    println!("Authentication successful! Token cached for future use.");
+  println!("Caching token to: {:?}", paths.token_cache_path);
+  
+  // Get the token and write it manually
+  if let Ok(token_guard) = spotify.token.lock().await {
+    if let Some(token) = token_guard.as_ref() {
+      match serde_json::to_string_pretty(token) {
+        Ok(token_json) => {
+          match std::fs::write(&paths.token_cache_path, token_json) {
+            Ok(_) => {
+              println!("Authentication successful! Token cached for future use.");
+            }
+            Err(e) => {
+              println!("Warning: Failed to write token cache file: {}", e);
+            }
+          }
+        }
+        Err(e) => {
+          println!("Warning: Failed to serialize token: {}", e);
+        }
+      }
+    } else {
+      println!("Warning: No token to cache");
+    }
   }
   
   Ok(spotify)

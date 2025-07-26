@@ -5,7 +5,7 @@ use ratatui::{
   layout::{Constraint, Direction, Layout},
   style::Style,
   text::{Line, Span},
-  widgets::{BarChart, Block, Borders, Paragraph},
+  widgets::{BarChart, Block, Borders, BorderType, Paragraph},
   Frame,
 };
 const PITCHES: [&str; 12] = [
@@ -27,6 +27,7 @@ pub fn draw(f: &mut Frame, app: &App) {
       Style::default().fg(app.user_config.theme.inactive),
     ))
     .borders(Borders::ALL)
+    .border_type(BorderType::Rounded)
     .border_style(Style::default().fg(app.user_config.theme.inactive));
 
   let white = Style::default().fg(app.user_config.theme.text);
@@ -37,6 +38,7 @@ pub fn draw(f: &mut Frame, app: &App) {
 
   let bar_chart_block = Block::default()
     .borders(Borders::ALL)
+    .border_type(BorderType::Rounded)
     .style(white)
     .title(Span::styled(bar_chart_title, gray))
     .border_style(gray);

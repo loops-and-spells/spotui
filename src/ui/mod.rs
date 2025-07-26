@@ -14,8 +14,9 @@ use ratatui::{
   backend::{Backend, CrosstermBackend},
   layout::{Alignment, Constraint, Direction, Layout, Rect},
   style::{Color, Modifier, Style},
+  symbols::border,
   text::{Line, Span, Text},
-  widgets::{Block, Borders, Clear, Gauge, List, ListItem, ListState, Paragraph, Row, Table, Wrap},
+  widgets::{Block, Borders, BorderType, Clear, Gauge, List, ListItem, ListState, Paragraph, Row, Table, Wrap},
   Frame,
 };
 use util::{
@@ -71,6 +72,18 @@ pub struct TableItem {
   format: Vec<String>,
 }
 
+/// Helper function to create a block with rounded corners and btop++ style
+fn create_styled_block<'a>(title: &'a str, highlight_color: Color) -> Block<'a> {
+  Block::default()
+    .borders(Borders::ALL)
+    .border_type(BorderType::Rounded)
+    .title(Span::styled(
+      title,
+      Style::default().fg(highlight_color).add_modifier(Modifier::BOLD),
+    ))
+    .border_style(Style::default().fg(highlight_color))
+}
+
 
 pub fn draw_input_and_help_box<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
 {
@@ -99,6 +112,7 @@ pub fn draw_input_and_help_box<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
   let input = Paragraph::new(lines).block(
     Block::default()
       .borders(Borders::ALL)
+      .border_type(BorderType::Rounded)
       .title(Span::styled(
         "Search",
         get_color(highlight_state, app.user_config.theme),
@@ -134,8 +148,9 @@ pub fn draw_input_and_help_box<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
   };
 
   let block = Block::default()
-    .title(Span::styled("Device", Style::default().fg(text_color)))
+    .title(Span::styled("Device", Style::default().fg(text_color).add_modifier(Modifier::BOLD)))
     .borders(Borders::ALL)
+    .border_type(BorderType::Rounded)
     .border_style(Style::default().fg(text_color));
 
   let lines = Text::from(device_text.as_str());
@@ -926,6 +941,7 @@ pub fn draw_playbar<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
 
       let title_block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .title(Span::styled(
           &title,
           get_color(highlight_state, app.user_config.theme),
@@ -966,12 +982,15 @@ pub fn draw_playbar<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
       let artist = Paragraph::new(lines)
         .style(Style::default().fg(app.user_config.theme.playbar_text))
         .block(
-          Block::default().title(Span::styled(
-            &track_name,
-            Style::default()
-              .fg(app.user_config.theme.selected)
-              .add_modifier(Modifier::BOLD),
-          ))
+          Block::default()
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded)
+            .title(Span::styled(
+              &track_name,
+              Style::default()
+                .fg(app.user_config.theme.selected)
+                .add_modifier(Modifier::BOLD),
+            ))
         );
       f.render_widget(artist, chunks[0]);
 
@@ -1009,6 +1028,7 @@ pub fn draw_playbar<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
       );
       let empty_block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .title(Span::styled(
           &device_text,
           Style::default().fg(app.user_config.theme.inactive),
@@ -1020,6 +1040,7 @@ pub fn draw_playbar<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
     // Clear the playbar area when no playback context exists
     let empty_block = Block::default()
       .borders(Borders::ALL)
+      .border_type(BorderType::Rounded)
       .title(Span::styled(
         "No active playback - Press 'd' to select a device",
         Style::default().fg(app.user_config.theme.inactive),
@@ -1049,6 +1070,7 @@ fn draw_home<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
       get_color(highlight_state, app.user_config.theme),
     ))
     .borders(Borders::ALL)
+    .border_type(BorderType::Rounded)
     .border_style(get_color(highlight_state, app.user_config.theme));
   f.render_widget(welcome, layout_chunk);
 
@@ -1251,6 +1273,7 @@ pub fn draw_device_list(f: &mut Frame, app: &App) {
           ),
         ]))
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(app.user_config.theme.inactive))
     )
     .style(Style::default().fg(app.user_config.theme.text))
@@ -1565,6 +1588,7 @@ fn draw_selectable_list<S>(
           get_color(highlight_state, app.user_config.theme),
         ))
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(get_color(highlight_state, app.user_config.theme))
     )
     .style(Style::default().fg(app.user_config.theme.text))
@@ -1591,6 +1615,7 @@ fn draw_dialog<B>(f: &mut Frame, app: &App)
 
       let block = Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(app.user_config.theme.inactive));
 
       f.render_widget(block, rect);
@@ -1868,6 +1893,7 @@ pub fn draw_log_stream<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
       Block::default()
         .title(title)
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .border_style(border_style)
     )
     .style(Style::default().fg(app.user_config.theme.text));
@@ -1893,6 +1919,7 @@ pub fn draw_log_stream_full_screen(f: &mut Frame, app: &App) {
     .block(
       Block::default()
         .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
         .title(Span::styled(
           "Log Stream Help",
           Style::default()
