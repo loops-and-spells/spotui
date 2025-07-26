@@ -174,6 +174,7 @@ pub struct Route {
 
 // Is it possible to compose enums?
 #[derive(PartialEq, Debug)]
+#[derive(Clone)]
 pub enum TrackTableContext {
   MyPlaylists,
   AlbumSearch,
@@ -262,6 +263,7 @@ pub struct Artist {
 
 pub struct App {
   pub instant_since_last_current_playback_poll: Instant,
+  pub instant_since_last_playback_toggle: Instant,
   navigation_stack: Vec<Route>,
   pub audio_analysis: Option<AudioAnalysis>,
   pub home_scroll: u16,
@@ -404,6 +406,7 @@ impl Default for App {
       selected_show_full: None,
       user: None,
       instant_since_last_current_playback_poll: Instant::now(),
+      instant_since_last_playback_toggle: Instant::now(),
       clipboard: Clipboard::new().ok(),
       is_loading: false,
       io_tx: None,
@@ -656,6 +659,14 @@ impl App {
   }
 
   pub fn toggle_playback(&mut self) {
+    // Add a cooldown to prevent rapid toggling
+    let elapsed = self.instant_since_last_playback_toggle.elapsed().as_millis();
+    if elapsed < 500 { // 500ms cooldown
+      return;
+    }
+    
+    self.instant_since_last_playback_toggle = Instant::now();
+    
     if let Some(CurrentPlaybackContext {
       is_playing: true, ..
     }) = &self.current_playback_context

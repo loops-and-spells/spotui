@@ -71,8 +71,15 @@ pub fn handler(key: Key, app: &mut App) {
               }
             }));
           
+          let album_id_str = selected_album.album.id.to_string();
+          let album_uri = if album_id_str.starts_with("spotify:album:") {
+            album_id_str
+          } else {
+            format!("spotify:album:{}", album_id_str)
+          };
+          
           app.dispatch(IoEvent::StartPlayback(
-            Some(format!("spotify:album:{}", selected_album.album.id.to_string())),
+            Some(album_uri),
             track_uri
           ));
         };
@@ -93,8 +100,15 @@ pub fn handler(key: Key, app: &mut App) {
               }
             }));
           
+          let album_id_str = selected_album_simplified.album.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string());
+          let album_uri = if album_id_str.starts_with("spotify:album:") {
+            album_id_str
+          } else {
+            format!("spotify:album:{}", album_id_str)
+          };
+          
           app.dispatch(IoEvent::StartPlayback(
-            Some(format!("spotify:album:{}", selected_album_simplified.album.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string()))),
+            Some(album_uri),
             track_uri
           ));
         };

@@ -179,13 +179,23 @@ fn play_random_song(app: &mut App) {
       TrackTableContext::RecommendedTracks => {}
       TrackTableContext::SavedTracks => {
         if let Some(saved_tracks) = &app.library.saved_tracks.get_results(None) {
-          let track_uris: Vec<String> = saved_tracks
-            .items
-            .iter()
-            .map(|item| format!("spotify:track:{}", item.track.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string())))
-            .collect();
-          let rand_idx = thread_rng().gen_range(0..track_uris.len());
-          app.dispatch(IoEvent::StartPlayback(None, None));
+          if !saved_tracks.items.is_empty() {
+            let rand_idx = thread_rng().gen_range(0..saved_tracks.items.len());
+            if let Some(saved_track) = saved_tracks.items.get(rand_idx) {
+              let track_uri = saved_track.track.id.as_ref().map(|id| {
+                let id_str = id.to_string();
+                if id_str.starts_with("spotify:track:") {
+                  id_str
+                } else {
+                  format!("spotify:track:{}", id_str)
+                }
+              });
+              
+              if let Some(uri) = track_uri {
+                app.dispatch(IoEvent::StartPlayback(Some(uri), None));
+              }
+            }
+          }
         }
       }
       TrackTableContext::AlbumSearch => {}
@@ -284,15 +294,15 @@ fn jump_to_end(app: &mut App) {
 }
 
 fn on_enter(app: &mut App) {
-  let TrackTable {
-    context,
-    selected_index,
-    tracks,
-  } = &app.track_table;
+  // Clone values we need to avoid borrow conflicts
+  let context = app.track_table.context.clone();
+  let selected_index = app.track_table.selected_index;
+  let tracks = app.track_table.tracks.clone();
+  
   match &context {
     Some(context) => match context {
       TrackTableContext::MyPlaylists => {
-        if let Some(_track) = tracks.get(*selected_index) {
+        if let Some(_track) = tracks.get(selected_index) {
           let context_uri = match (&app.selected_playlist_index, &app.playlists) {
             (Some(selected_playlist_index), Some(playlists)) => playlists
               .items
@@ -309,7 +319,7 @@ fn on_enter(app: &mut App) {
           };
 
           // For playlists, we need to pass the track URI as offset to play specific track
-          let track_uri = tracks.get(*selected_index).and_then(|track| {
+          let track_uri = tracks.get(selected_index).and_then(|track| {
             track.id.as_ref().map(|id| {
               let id_str = id.to_string();
               if id_str.starts_with("spotify:track:") {
@@ -326,24 +336,34 @@ fn on_enter(app: &mut App) {
         app.dispatch(IoEvent::StartPlayback(None, None));
       }
       TrackTableContext::SavedTracks => {
-        if let Some(saved_tracks) = &app.library.saved_tracks.get_results(None) {
-          let track_uris: Vec<String> = saved_tracks
-            .items
-            .iter()
-            .map(|item| format!("spotify:track:{}", item.track.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string())))
-            .collect();
-
-          app.dispatch(IoEvent::StartPlayback(None, None));
-        };
+        // Extract saved tracks data to avoid borrow issues
+        let saved_track_data = app.library.saved_tracks.get_results(None)
+          .and_then(|saved_tracks| {
+            saved_tracks.items.get(selected_index).map(|saved_track| {
+              saved_track.track.id.clone()
+            })
+          });
+        
+        if let Some(track_id) = saved_track_data {
+          // Play the specific track
+          let track_uri = track_id.map(|id| {
+            let id_str = id.to_string();
+            if id_str.starts_with("spotify:track:") {
+              id_str
+            } else {
+              format!("spotify:track:{}", id_str)
+            }
+          });
+          
+          if let Some(uri) = track_uri {
+            // Start playback with just the track URI (no context)
+            app.dispatch(IoEvent::StartPlayback(Some(uri.clone()), None));
+          }
+        }
       }
       TrackTableContext::AlbumSearch => {}
       TrackTableContext::PlaylistSearch => {
-        let TrackTable {
-          selected_index,
-          tracks,
-          ..
-        } = &app.track_table;
-        if let Some(_track) = tracks.get(*selected_index) {
+        if let Some(_track) = tracks.get(selected_index) {
           let context_uri = match (
             &app.search_results.selected_playlists_index,
             &app.search_results.playlists,
@@ -359,7 +379,7 @@ fn on_enter(app: &mut App) {
         };
       }
       TrackTableContext::MadeForYou => {
-        if let Some(_track) = tracks.get(*selected_index) {
+        if let Some(_track) = tracks.get(selected_index) {
           let context_uri = Some(format!(
             "spotify:playlist:{}",
             app
@@ -375,7 +395,7 @@ fn on_enter(app: &mut App) {
           ));
 
           // For playlists, we need to pass the track URI as offset to play specific track
-          let track_uri = tracks.get(*selected_index).and_then(|track| {
+          let track_uri = tracks.get(selected_index).and_then(|track| {
             track.id.as_ref().map(|id| {
               let id_str = id.to_string();
               if id_str.starts_with("spotify:track:") {
@@ -416,7 +436,14 @@ fn on_queue(app: &mut App) {
       TrackTableContext::SavedTracks => {
         if let Some(page) = app.library.saved_tracks.get_results(None) {
           if let Some(saved_track) = page.items.get(app.track_table.selected_index) {
-            let uri = format!("spotify:track:{}", saved_track.track.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string()));
+            let uri = saved_track.track.id.as_ref().map(|id| {
+              let id_str = id.to_string();
+              if id_str.starts_with("spotify:track:") {
+                id_str
+              } else {
+                format!("spotify:track:{}", id_str)
+              }
+            }).unwrap_or_else(|| "".to_string());
             app.dispatch(IoEvent::AddItemToQueue(uri));
           }
         }

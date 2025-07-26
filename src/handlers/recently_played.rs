@@ -51,13 +51,22 @@ pub fn handler(key: Key, app: &mut App) {
     }
     Key::Enter => {
       if let Some(recently_played_result) = &app.recently_played.result.clone() {
-        let track_uris: Vec<String> = recently_played_result
-          .items
-          .iter()
-          .map(|item| format!("spotify:track:{}", item.track.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string())))
-          .collect();
-
-        app.dispatch(IoEvent::StartPlayback(None, None));
+        if let Some(selected_item) = recently_played_result.items.get(app.recently_played.index) {
+          // Play the specific track
+          let track_uri = selected_item.track.id.as_ref().map(|id| {
+            let id_str = id.to_string();
+            if id_str.starts_with("spotify:track:") {
+              id_str
+            } else {
+              format!("spotify:track:{}", id_str)
+            }
+          });
+          
+          if let Some(uri) = track_uri {
+            // Start playback with just the track URI (no context)
+            app.dispatch(IoEvent::StartPlayback(Some(uri.clone()), None));
+          }
+        }
       };
     }
     Key::Char('r') => {
@@ -77,7 +86,15 @@ pub fn handler(key: Key, app: &mut App) {
     _ if key == app.user_config.keys.add_item_to_queue => {
       if let Some(recently_played_result) = &app.recently_played.result.clone() {
         if let Some(history) = recently_played_result.items.get(app.recently_played.index) {
-          app.dispatch(IoEvent::AddItemToQueue(format!("spotify:track:{}", history.track.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string()))))
+          let track_uri = history.track.id.as_ref().map(|id| {
+            let id_str = id.to_string();
+            if id_str.starts_with("spotify:track:") {
+              id_str
+            } else {
+              format!("spotify:track:{}", id_str)
+            }
+          }).unwrap_or_else(|| "".to_string());
+          app.dispatch(IoEvent::AddItemToQueue(track_uri))
         }
       };
     }

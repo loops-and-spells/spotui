@@ -14,7 +14,7 @@ use rspotify::{
     page::Page,
     playlist::SimplifiedPlaylist,
     show::SimplifiedShow,
-    track::FullTrack,
+    track::{FullTrack, SavedTrack},
     show::SimplifiedEpisode,
     PlayableItem,
     CurrentPlaybackContext,
@@ -520,7 +520,15 @@ impl Network {
         self.log_error("SUCCESS: Started playback");
         let mut app = self.app.lock().await;
         app.add_log_message("Playback started".to_string());
-        // Playback started - already logged
+        // Update the playback state when resuming
+        if context_uri.is_none() && offset_uri.is_none() {
+          // This was a resume operation, update the state
+          if let Some(ref mut context) = app.current_playback_context {
+            context.is_playing = true;
+          }
+          // Schedule a playback state refresh
+          app.dispatch(IoEvent::GetCurrentPlayback);
+        }
       }
       Err(e) => {
         let error_msg = format!("ERROR: Failed to start playback: {:?}", e);
@@ -624,18 +632,34 @@ impl Network {
       Ok(_) => {
         let mut app = self.app.lock().await;
         app.add_log_message("Playback paused".to_string());
-        // Playback paused - already logged
+        // Update the playback state locally
+        if let Some(ref mut context) = app.current_playback_context {
+          context.is_playing = false;
+        }
+        // Schedule a playback state refresh
+        app.dispatch(IoEvent::GetCurrentPlayback);
       },
       Err(e) => {
         let error_msg = format!("{:?}", e);
+        self.log_error(&format!("Pause error: {}", error_msg));
+        
+        // For 403 errors, don't show the premium error immediately
+        // It might be a temporary issue with the device
         if error_msg.contains("status: 403") {
           let mut app = self.app.lock().await;
-          app.add_log_message("Spotify Premium required for pause control".to_string());
-          app.handle_error(anyhow::anyhow!("Spotify Premium required for playback controls"));
+          // Just log it without showing an error dialog
+          app.add_log_message("Failed to pause - try again or check device".to_string());
+          // Update the state anyway to keep UI in sync
+          if let Some(ref mut context) = app.current_playback_context {
+            context.is_playing = false;
+          }
+        } else if error_msg.contains("status: 404") {
+          let mut app = self.app.lock().await;
+          app.add_log_message("No active device found for pause".to_string());
         } else {
           let mut app = self.app.lock().await;
           app.add_log_message(format!("Pause error: {}", e));
-          app.handle_error(anyhow::anyhow!("Error pausing playback: {}", e));
+          // Don't show error dialog for pause failures
         }
       }
     }
@@ -850,15 +874,31 @@ impl Network {
         self.log_error(&format!("SUCCESS: Got {} saved tracks", saved_tracks.len()));
         let mut app = self.app.lock().await;
         
-        // For now, just set the tracks directly to the track table
+        // Set the tracks in the track table for display
         app.track_table.tracks = saved_tracks.iter().map(|saved_track| {
           saved_track.track.clone()
         }).collect();
         
+        // Create a Page<SavedTrack> to store in library.saved_tracks
+        let page = Page {
+          href: String::new(), // Not available from stream API
+          items: saved_tracks,
+          total: 50, // We don't have total count from stream API
+          limit: 50,
+          offset: offset.unwrap_or(0),
+          next: None,
+          previous: None,
+        };
+        
+        // Initialize or update the saved tracks in the library
+        app.library.saved_tracks = ScrollableResultPages::new();
+        app.library.saved_tracks.pages.push(page);
+        
         // Set context so the UI knows we're showing saved tracks
         app.track_table.context = Some(TrackTableContext::SavedTracks);
         
-        app.add_log_message(format!("Loaded {} liked songs", saved_tracks.len()));
+        let track_count = app.track_table.tracks.len();
+        app.add_log_message(format!("Loaded {} liked songs", track_count));
       }
       Err(e) => {
         let error_msg = format!("DETAILED ERROR getting saved tracks: {:?}", e);
