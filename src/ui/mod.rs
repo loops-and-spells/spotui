@@ -121,11 +121,7 @@ pub fn draw_input_and_help_box<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
   );
   f.render_widget(input, chunks[0]);
 
-  let show_loading = app.is_loading && app.user_config.behavior.show_loading_indicator;
-  
-  let (device_text, text_color) = if show_loading {
-    ("Loading...".to_string(), app.user_config.theme.hint)
-  } else if let Some(context) = &app.current_playback_context {
+  let (device_text, text_color) = if let Some(context) = &app.current_playback_context {
     (context.device.name.clone(), app.user_config.theme.active)
   } else if let Some(devices) = &app.devices {
     if devices.devices.is_empty() {

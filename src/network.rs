@@ -329,6 +329,8 @@ impl Network {
       href: String::new(),
     };
     app.playlists = Some(page);
+    // Set loading to false after playlists are loaded
+    app.is_loading = false;
   }
 
   async fn get_user(&mut self) {

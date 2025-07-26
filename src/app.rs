@@ -264,6 +264,7 @@ pub struct Artist {
 pub struct App {
   pub instant_since_last_current_playback_poll: Instant,
   pub instant_since_last_playback_toggle: Instant,
+  pub instant_since_last_device_poll: Instant,
   navigation_stack: Vec<Route>,
   pub audio_analysis: Option<AudioAnalysis>,
   pub home_scroll: u16,
@@ -407,6 +408,7 @@ impl Default for App {
       user: None,
       instant_since_last_current_playback_poll: Instant::now(),
       instant_since_last_playback_toggle: Instant::now(),
+      instant_since_last_device_poll: Instant::now(),
       clipboard: Clipboard::new().ok(),
       is_loading: false,
       io_tx: None,
@@ -437,11 +439,8 @@ impl App {
 
   // Send a network event to the network thread
   pub fn dispatch(&mut self, action: IoEvent) {
-    // `is_loading` will be set to false again after the async action has finished in network.rs
-    self.is_loading = true;
     if let Some(io_tx) = &self.io_tx {
       if let Err(e) = io_tx.send(action) {
-        self.is_loading = false;
         self.handle_error(anyhow::anyhow!("Failed to dispatch event: {}", e));
       };
     }
@@ -488,6 +487,15 @@ impl App {
 
   pub fn update_on_tick(&mut self) {
     self.poll_current_playback();
+    
+    // Poll devices every 30 seconds
+    let device_poll_interval_ms = 30_000;
+    let device_elapsed = self.instant_since_last_device_poll.elapsed().as_millis();
+    
+    if device_elapsed >= device_poll_interval_ms {
+      self.dispatch(IoEvent::GetDevices);
+      self.instant_since_last_device_poll = Instant::now();
+    }
     if let Some(CurrentPlaybackContext {
       item: Some(item),
       is_playing,
