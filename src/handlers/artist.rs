@@ -1,5 +1,5 @@
 use super::common_key_events;
-use crate::app::{ActiveBlock, App, ArtistBlock, RecommendationsContext, TrackTableContext};
+use crate::app::{ActiveBlock, App, ArtistBlock, RecommendationsContext, RouteId, TrackTableContext};
 use crate::event::Key;
 use crate::network::IoEvent;
 
@@ -188,12 +188,13 @@ fn handle_enter_event_on_selected_block(app: &mut App) {
     match artist.artist_selected_block {
       ArtistBlock::TopTracks => {
         let selected_index = artist.selected_top_track_index;
-        let top_tracks: Vec<String> = artist
-          .top_tracks
-          .iter()
-          .map(|track| format!("spotify:track:{}", track.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string())).to_owned())
-          .collect();
-        app.dispatch(IoEvent::StartPlayback(None, None));
+        if let Some(selected_track) = artist.top_tracks.get(selected_index) {
+          if let Some(track_id) = &selected_track.id {
+            let track_uri = format!("spotify:track:{}", track_id);
+            // Play the selected track
+            app.dispatch(IoEvent::StartPlayback(None, Some(track_uri)));
+          }
+        }
       }
       ArtistBlock::Albums => {
         if let Some(selected_album) = artist
@@ -203,7 +204,11 @@ fn handle_enter_event_on_selected_block(app: &mut App) {
           .cloned()
         {
           app.track_table.context = Some(TrackTableContext::AlbumSearch);
-          app.dispatch(IoEvent::GetAlbumTracks(selected_album.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string())));
+          if let Some(album_id) = selected_album.id.as_ref() {
+            app.dispatch(IoEvent::GetAlbumTracks(album_id.to_string()));
+            // Navigate to the track table view to show the album tracks
+            app.push_navigation_stack(RouteId::TrackTable, ActiveBlock::TrackTable);
+          }
         }
       }
       ArtistBlock::RelatedArtists => {

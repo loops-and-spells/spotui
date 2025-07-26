@@ -66,6 +66,7 @@ fn get_scopes() -> std::collections::HashSet<String> {
     "user-read-playback-position",
     "user-read-private",
     "user-read-recently-played",
+    "user-top-read",
   ].iter().map(|s| s.to_string()).collect()
 }
 

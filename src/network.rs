@@ -236,8 +236,7 @@ impl Network {
         // TODO: Implement CurrentUserSavedAlbumAdd
       }
       IoEvent::GetMadeForYouPlaylistTracks(playlist_id, offset) => {
-        // TODO: Implement get made for you playlist tracks
-        // TODO: Implement GetMadeForYouPlaylistTracks
+        self.get_playlist_tracks(&playlist_id, offset).await;
       }
       IoEvent::GetShowEpisodes(show) => {
         // TODO: Implement get show episodes

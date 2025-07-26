@@ -1207,14 +1207,37 @@ impl App {
   }
 
   fn made_for_you_search_and_add(&mut self, search_string: &str) {
-    let user_country = self.get_user_country();
-    // TODO: Implement MadeForYouSearchAndAdd in network.rs
-    self.add_log_message(format!("'Made For You' playlist search not implemented - would search for: {}", search_string));
-    self.add_log_message("Tip: You can find these playlists in your regular playlist list".to_string());
-    // self.dispatch(IoEvent::MadeForYouSearchAndAdd(
-    //   search_string.to_string(),
-    //   user_country,
-    // ));
+    // For now, just search through existing playlists instead of doing a search
+    let found_playlists: Vec<(String, SimplifiedPlaylist)> = if let Some(playlists) = &self.playlists {
+      playlists.items.iter()
+        .filter(|playlist| playlist.name.to_lowercase().contains(&search_string.to_lowercase()))
+        .map(|p| (p.name.clone(), p.clone()))
+        .collect()
+    } else {
+      vec![]
+    };
+    
+    for (name, playlist) in found_playlists {
+      // Add to made for you if not already there
+      let already_exists = self.library.made_for_you_playlists.pages
+        .iter()
+        .any(|p| p.items.iter().any(|item| item.id == playlist.id));
+      
+      if !already_exists {
+        // Create a page with this playlist
+        let page = Page {
+          items: vec![playlist],
+          limit: 1,
+          offset: 0,
+          total: 1,
+          next: None,
+          previous: None,
+          href: String::new(),
+        };
+        self.library.made_for_you_playlists.pages.push(page);
+        self.add_log_message(format!("Found '{}' playlist", name));
+      }
+    }
   }
 
   pub fn get_audio_analysis(&mut self) {
