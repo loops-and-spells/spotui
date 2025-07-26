@@ -12,7 +12,6 @@ mod home;
 mod input;
 mod library;
 mod log_stream;
-mod made_for_you;
 mod playbar;
 mod playlist;
 mod podcasts;
@@ -39,14 +38,17 @@ pub fn handle_app(key: Key, app: &mut App) {
     }
     // Component entry shortcuts - enter components directly for internal navigation
     Key::Char('L') | Key::Char('l') => {
+      app.clear_navigation_stack();
       app.enter_component(ComponentId::Library);
       app.set_current_route_state(Some(ActiveBlock::Library), Some(ActiveBlock::Library));
     }
     Key::Char('P') | Key::Char('p') => {
+      app.clear_navigation_stack();
       app.enter_component(ComponentId::MyPlaylists);
       app.set_current_route_state(Some(ActiveBlock::MyPlaylists), Some(ActiveBlock::MyPlaylists));
     }
     Key::Char('S') | Key::Char('s') => {
+      app.clear_navigation_stack();
       app.enter_component(ComponentId::SearchInput);
       app.set_current_route_state(Some(ActiveBlock::Input), Some(ActiveBlock::Input));
       // Clear any existing search results focus to avoid dual focus
@@ -197,9 +199,6 @@ fn handle_block_events(key: Key, app: &mut App) {
     }
     ActiveBlock::Artists => {
       artists::handler(key, app);
-    }
-    ActiveBlock::MadeForYou => {
-      made_for_you::handler(key, app);
     }
     ActiveBlock::Podcasts => {
       podcasts::handler(key, app);

@@ -21,7 +21,7 @@ use ratatui::{
   Frame,
 };
 use util::{
-  create_artist_string, display_track_progress, get_artist_highlight_state, get_color,
+  create_artist_string, get_artist_highlight_state, get_color,
   get_percentage_width, get_search_results_highlight_state, get_track_progress_percentage,
   millis_to_minutes, BASIC_VIEW_HEIGHT, SMALL_TERMINAL_WIDTH,
 };
@@ -33,7 +33,6 @@ pub enum TableId {
   Podcast,
   Song,
   RecentlyPlayed,
-  MadeForYou,
   PodcastEpisodes,
 }
 
@@ -290,9 +289,6 @@ pub fn draw_routes<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
     }
     RouteId::Home => {
       draw_home::<CrosstermBackend<std::io::Stdout>>(f, app, right_chunks[1]);
-    }
-    RouteId::MadeForYou => {
-      draw_made_for_you::<CrosstermBackend<std::io::Stdout>>(f, app, right_chunks[1]);
     }
     RouteId::Artists => {
       draw_artist_table::<CrosstermBackend<std::io::Stdout>>(f, app, right_chunks[1]);
@@ -976,9 +972,8 @@ pub fn draw_playbar<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
     .direction(Direction::Vertical)
     .constraints(
       [
-        Constraint::Percentage(50),
-        Constraint::Percentage(25),
-        Constraint::Percentage(25),
+        Constraint::Min(1),          // Track info takes remaining space
+        Constraint::Length(3),       // Progress bar is 3 units tall
       ]
       .as_ref(),
     )
@@ -1058,7 +1053,7 @@ pub fn draw_playbar<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
       };
 
       let lines = Text::from(Span::styled(
-        play_bar_text,
+        play_bar_text.clone(),
         Style::default().fg(app.user_config.theme.playbar_text),
       ));
 
@@ -1084,25 +1079,29 @@ pub fn draw_playbar<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
 
       let perc = get_track_progress_percentage(progress_ms, duration_ms.num_milliseconds() as u32);
 
-      let song_progress_label = display_track_progress(progress_ms, duration_ms.num_milliseconds() as u32);
-      let modifier = if app.user_config.behavior.enable_text_emphasis {
-        Modifier::ITALIC | Modifier::BOLD
-      } else {
-        Modifier::empty()
-      };
+      // Create the label text with track name and artist, similar to fullscreen mode
+      let progress_label = format!("{} - {}", 
+        track_name, 
+        play_bar_text
+      );
+      
+      // Calculate progress ratio for the gauge
+      let progress_ratio = f64::from(perc) / 100.0;
+      
+      // Calculate text color with good contrast against the progress bar
+      let text_color = calculate_text_color_for_progress(vibrant_color, dark_color);
+      
       let song_progress = Gauge::default()
-        .gauge_style(
-          Style::default()
-            .fg(vibrant_color)
-            .bg(dark_color)
-            .add_modifier(modifier),
-        )
-        .percent(perc)
+        .block(Block::default().borders(Borders::NONE))
+        .gauge_style(Style::default()
+          .fg(vibrant_color)
+          .bg(dark_color))
+        .ratio(progress_ratio)
         .label(Span::styled(
-          &song_progress_label,
-          Style::default().fg(Color::White),
+          progress_label,
+          Style::default().fg(text_color).add_modifier(Modifier::BOLD),
         ));
-      f.render_widget(song_progress, chunks[2]);
+      f.render_widget(song_progress, chunks[1]);
     } else {
       // Clear the playbar area when no track is playing
       let device_text = format!(
@@ -1537,45 +1536,6 @@ pub fn draw_show_episodes<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
       highlight_state,
     );
   };
-}
-
-pub fn draw_made_for_you<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
-{
-  let header = TableHeader {
-    id: TableId::MadeForYou,
-    items: vec![TableHeaderItem {
-      text: "Name",
-      width: get_percentage_width(layout_chunk.width, 2.0 / 5.0),
-      ..Default::default()
-    }],
-  };
-
-  if let Some(playlists) = &app.library.made_for_you_playlists.get_results(None) {
-    let items = playlists
-      .items
-      .iter()
-      .map(|playlist| TableItem {
-        id: playlist.id.to_string(),
-        format: vec![playlist.name.to_owned()],
-      })
-      .collect::<Vec<TableItem>>();
-
-    let current_route = app.get_current_route();
-    let highlight_state = (
-      current_route.active_block == ActiveBlock::MadeForYou,
-      current_route.hovered_block == ActiveBlock::MadeForYou,
-    );
-
-    draw_table::<CrosstermBackend<std::io::Stdout>>(
-      f,
-      app,
-      layout_chunk,
-      ("", &header),
-      &items,
-      app.made_for_you_index,
-      highlight_state,
-    );
-  }
 }
 
 pub fn draw_recently_played_table<B>(f: &mut Frame, app: &App, layout_chunk: Rect)

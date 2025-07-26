@@ -302,7 +302,7 @@ impl UserConfig {
         playing_icon: "▶".to_string(),
         paused_icon: "⏸".to_string(),
         set_window_title: true,
-        idle_timeout_seconds: 15,
+        idle_timeout_seconds: 30,
       },
       path_to_config: None,
     }

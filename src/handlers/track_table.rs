@@ -65,27 +65,6 @@ pub fn handler(key: Key, app: &mut App) {
           }
           TrackTableContext::AlbumSearch => {}
           TrackTableContext::PlaylistSearch => {}
-          TrackTableContext::MadeForYou => {
-            let (playlists, selected_playlist_index) =
-              (&app.library.made_for_you_playlists, &app.made_for_you_index);
-
-            if let Some(selected_playlist) = playlists
-              .get_results(Some(0))
-              .unwrap()
-              .items
-              .get(selected_playlist_index.to_owned())
-            {
-              if let Some(_playlist_tracks) = &app.made_for_you_tracks {
-                // Note: total field access removed as it's no longer available
-                app.made_for_you_offset += app.large_search_limit;
-                let playlist_id = selected_playlist.id.to_string();
-                app.dispatch(IoEvent::GetMadeForYouPlaylistTracks(
-                  playlist_id,
-                  app.made_for_you_offset,
-                ));
-              }
-            }
-          }
         },
         None => {}
       };
@@ -115,26 +94,6 @@ pub fn handler(key: Key, app: &mut App) {
           }
           TrackTableContext::AlbumSearch => {}
           TrackTableContext::PlaylistSearch => {}
-          TrackTableContext::MadeForYou => {
-            let (playlists, selected_playlist_index) = (
-              &app
-                .library
-                .made_for_you_playlists
-                .get_results(Some(0))
-                .unwrap(),
-              app.made_for_you_index,
-            );
-            if app.made_for_you_offset >= app.large_search_limit {
-              app.made_for_you_offset -= app.large_search_limit;
-            }
-            if let Some(selected_playlist) = playlists.items.get(selected_playlist_index) {
-              let playlist_id = selected_playlist.id.to_string();
-              app.dispatch(IoEvent::GetMadeForYouPlaylistTracks(
-                playlist_id,
-                app.made_for_you_offset,
-              ));
-            }
-          }
         },
         None => {}
       };
@@ -224,20 +183,6 @@ fn play_random_song(app: &mut App) {
           app.dispatch(IoEvent::StartPlayback(context_uri, None));
         }
       }
-      TrackTableContext::MadeForYou => {
-        if let Some(playlist) = &app
-          .library
-          .made_for_you_playlists
-          .get_results(Some(0))
-          .and_then(|playlist| playlist.items.get(app.made_for_you_index))
-        {
-          // Note: playlist.tracks structure changed in newer API
-          if let Some(_num_tracks) = Some(0usize) {
-            let uri = Some(format!("spotify:playlist:{}", playlist.id.to_string()));
-            app.dispatch(IoEvent::StartPlayback(uri, None));
-          };
-        };
-      }
     }
   };
 }
@@ -287,7 +232,6 @@ fn jump_to_end(app: &mut App) {
       TrackTableContext::SavedTracks => {}
       TrackTableContext::AlbumSearch => {}
       TrackTableContext::PlaylistSearch => {}
-      TrackTableContext::MadeForYou => {}
     },
     None => {}
   }
@@ -378,36 +322,6 @@ fn on_enter(app: &mut App) {
           app.dispatch(IoEvent::StartPlayback(context_uri, None));
         };
       }
-      TrackTableContext::MadeForYou => {
-        if let Some(_track) = tracks.get(selected_index) {
-          let context_uri = Some(format!(
-            "spotify:playlist:{}",
-            app
-              .library
-              .made_for_you_playlists
-              .get_results(Some(0))
-              .unwrap()
-              .items
-              .get(app.made_for_you_index)
-              .unwrap()
-              .id
-              .to_string()
-          ));
-
-          // For playlists, we need to pass the track URI as offset to play specific track
-          let track_uri = tracks.get(selected_index).and_then(|track| {
-            track.id.as_ref().map(|id| {
-              let id_str = id.to_string();
-              if id_str.starts_with("spotify:track:") {
-                id_str
-              } else {
-                format!("spotify:track:{}", id_str)
-              }
-            })
-          });
-          app.dispatch(IoEvent::StartPlayback(context_uri, track_uri));
-        }
-      }
     },
     None => {}
   };
@@ -460,12 +374,6 @@ fn on_queue(app: &mut App) {
           app.dispatch(IoEvent::AddItemToQueue(uri));
         };
       }
-      TrackTableContext::MadeForYou => {
-        if let Some(track) = tracks.get(*selected_index) {
-          let uri = format!("spotify:track:{}", track.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string()));
-          app.dispatch(IoEvent::AddItemToQueue(uri));
-        }
-      }
     },
     None => {}
   };
@@ -489,7 +397,6 @@ fn jump_to_start(app: &mut App) {
       TrackTableContext::SavedTracks => {}
       TrackTableContext::AlbumSearch => {}
       TrackTableContext::PlaylistSearch => {}
-      TrackTableContext::MadeForYou => {}
     },
     None => {}
   }

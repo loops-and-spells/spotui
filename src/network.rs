@@ -63,7 +63,6 @@ pub enum IoEvent {
   GetAudioAnalysis(String),
   AddItemToQueue(String),
   CurrentUserSavedAlbumAdd(String),
-  GetMadeForYouPlaylistTracks(String, u32),
   GetShowEpisodes(Box<SimplifiedShow>),
   GetAlbum(String),
   GetAlbumForTrack(String),
@@ -235,9 +234,6 @@ impl Network {
       IoEvent::CurrentUserSavedAlbumAdd(album_id) => {
         // TODO: Implement save album
         // TODO: Implement CurrentUserSavedAlbumAdd
-      }
-      IoEvent::GetMadeForYouPlaylistTracks(playlist_id, offset) => {
-        self.get_playlist_tracks(&playlist_id, offset).await;
       }
       IoEvent::GetShowEpisodes(show) => {
         // TODO: Implement get show episodes

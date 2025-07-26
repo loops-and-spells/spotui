@@ -32,8 +32,7 @@ use ratatui::layout::Rect;
 
 use arboard::Clipboard;
 
-pub const LIBRARY_OPTIONS: [&str; 8] = [
-  "Made For You",
+pub const LIBRARY_OPTIONS: [&str; 7] = [
   "Recently Played",
   "Liked Songs",
   "Albums",
@@ -88,7 +87,6 @@ pub struct SpotifyResultAndSelectedIndex<T> {
 pub struct Library {
   pub selected_index: usize,
   pub saved_tracks: ScrollableResultPages<Page<SavedTrack>>,
-  pub made_for_you_playlists: ScrollableResultPages<Page<SimplifiedPlaylist>>,
   pub saved_albums: ScrollableResultPages<Page<SavedAlbum>>,
   pub saved_shows: ScrollableResultPages<Page<SimplifiedShow>>,
   pub saved_artists: ScrollableResultPages<CursorBasedPage<FullArtist>>,
@@ -139,7 +137,6 @@ pub enum ActiveBlock {
   SearchResultBlock,
   SelectDevice,
   TrackTable,
-  MadeForYou,
   Artists,
   BasicView,
   LogStream,
@@ -159,7 +156,6 @@ pub enum RouteId {
   Search,
   SelectedDevice,
   TrackTable,
-  MadeForYou,
   Artists,
   Podcasts,
   PodcastEpisodes,
@@ -184,7 +180,6 @@ pub enum TrackTableContext {
   PlaylistSearch,
   SavedTracks,
   RecommendedTracks,
-  MadeForYou,
 }
 
 // Is it possible to compose enums?
@@ -295,10 +290,8 @@ pub struct App {
   pub large_search_limit: u32,
   pub library: Library,
   pub playlist_offset: u32,
-  pub made_for_you_offset: u32,
   // Placeholder types for compilation - TODO: Fix with proper rspotify 0.15 types
   pub playlist_tracks: Option<()>,
-  pub made_for_you_tracks: Option<()>,
   pub playlists: Option<Page<SimplifiedPlaylist>>,
   pub recently_played: SpotifyResultAndSelectedIndex<Option<CursorBasedPage<PlayHistory>>>,
   pub recommended_tracks: Vec<FullTrack>,
@@ -320,7 +313,6 @@ pub struct App {
   pub selected_show_full: Option<SelectedFullShow>,
   pub user: Option<PrivateUser>,
   pub album_list_index: usize,
-  pub made_for_you_index: usize,
   pub artists_list_index: usize,
   pub clipboard: Option<Clipboard>,
   pub shows_list_index: usize,
@@ -348,7 +340,6 @@ impl Default for App {
       audio_analysis: None,
       album_table_context: AlbumTableContext::Full,
       album_list_index: 0,
-      made_for_you_index: 0,
       artists_list_index: 0,
       shows_list_index: 0,
       episode_list_index: 0,
@@ -363,7 +354,6 @@ impl Default for App {
       home_scroll: 0,
       library: Library {
         saved_tracks: ScrollableResultPages::new(),
-        made_for_you_playlists: ScrollableResultPages::new(),
         saved_albums: ScrollableResultPages::new(),
         saved_shows: ScrollableResultPages::new(),
         saved_artists: ScrollableResultPages::new(),
@@ -384,9 +374,7 @@ impl Default for App {
       input_idx: 0,
       input_cursor_position: 0,
       playlist_offset: 0,
-      made_for_you_offset: 0,
       playlist_tracks: None,
-      made_for_you_tracks: None,
       playlists: None,
       recommended_tracks: vec![],
       recommendations_context: None,
@@ -741,6 +729,12 @@ impl App {
     }
   }
 
+  pub fn clear_navigation_stack(&mut self) {
+    self.add_log_message("Clearing navigation stack to return to root".to_string());
+    self.navigation_stack.clear();
+    self.navigation_stack.push(DEFAULT_ROUTE);
+  }
+
   pub fn get_current_route(&self) -> &Route {
     // if for some reason there is no route return the default
     self.navigation_stack.last().unwrap_or(&DEFAULT_ROUTE)
@@ -769,15 +763,6 @@ impl App {
             }
             Some(TrackTableContext::SavedTracks) => "Liked Songs",
             Some(TrackTableContext::RecommendedTracks) => "Recommended",
-            Some(TrackTableContext::MadeForYou) => {
-              if let Some(playlists) = &self.library.made_for_you_playlists.get_results(None) {
-                playlists.items.get(self.made_for_you_index)
-                  .map(|p| p.name.as_str())
-                  .unwrap_or("Made For You")
-              } else {
-                "Made For You"
-              }
-            }
             Some(TrackTableContext::AlbumSearch) => "Album",
             Some(TrackTableContext::PlaylistSearch) => "Search Results",
             None => "Tracks",
@@ -795,7 +780,6 @@ impl App {
         RouteId::RecentlyPlayed => "Recently Played",
         RouteId::Search => "Search",
         RouteId::Artists => "Artists",
-        RouteId::MadeForYou => "Made For You",
         RouteId::Podcasts => "Podcasts",
         RouteId::PodcastEpisodes => "Episodes",
         RouteId::Recommendations => "Recommendations",
@@ -1265,59 +1249,6 @@ impl App {
         }
       },
       _ => (),
-    }
-  }
-
-  pub fn get_made_for_you(&mut self) {
-    // TODO: replace searches when relevant endpoint is added
-    const DISCOVER_WEEKLY: &str = "Discover Weekly";
-    const RELEASE_RADAR: &str = "Release Radar";
-    const ON_REPEAT: &str = "On Repeat";
-    const REPEAT_REWIND: &str = "Repeat Rewind";
-    const DAILY_DRIVE: &str = "Daily Drive";
-
-    if self.library.made_for_you_playlists.pages.is_empty() {
-      // We shouldn't be fetching all the results immediately - only load the data when the
-      // user selects the playlist
-      self.made_for_you_search_and_add(DISCOVER_WEEKLY);
-      self.made_for_you_search_and_add(RELEASE_RADAR);
-      self.made_for_you_search_and_add(ON_REPEAT);
-      self.made_for_you_search_and_add(REPEAT_REWIND);
-      self.made_for_you_search_and_add(DAILY_DRIVE);
-    }
-  }
-
-  fn made_for_you_search_and_add(&mut self, search_string: &str) {
-    // For now, just search through existing playlists instead of doing a search
-    let found_playlists: Vec<(String, SimplifiedPlaylist)> = if let Some(playlists) = &self.playlists {
-      playlists.items.iter()
-        .filter(|playlist| playlist.name.to_lowercase().contains(&search_string.to_lowercase()))
-        .map(|p| (p.name.clone(), p.clone()))
-        .collect()
-    } else {
-      vec![]
-    };
-    
-    for (name, playlist) in found_playlists {
-      // Add to made for you if not already there
-      let already_exists = self.library.made_for_you_playlists.pages
-        .iter()
-        .any(|p| p.items.iter().any(|item| item.id == playlist.id));
-      
-      if !already_exists {
-        // Create a page with this playlist
-        let page = Page {
-          items: vec![playlist],
-          limit: 1,
-          offset: 0,
-          total: 1,
-          next: None,
-          previous: None,
-          href: String::new(),
-        };
-        self.library.made_for_you_playlists.pages.push(page);
-        self.add_log_message(format!("Found '{}' playlist", name));
-      }
     }
   }
 
