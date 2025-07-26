@@ -217,6 +217,9 @@ impl Network {
       IoEvent::SetVolume(volume) => {
         self.set_volume(volume).await;
       }
+      IoEvent::TransferPlaybackToDevice(device_id) => {
+        self.transfer_playback_to_device(device_id).await;
+      }
       IoEvent::GetDevices => {
         self.get_devices().await;
       }
@@ -566,7 +569,15 @@ impl Network {
               rspotify::model::Offset::Uri(uri.clone())
             });
             
-            self.spotify.start_context_playback(context, None, offset, None).await
+            // Get current device ID from app state
+            let device_id = {
+              let app = self.app.lock().await;
+              app.current_playback_context.as_ref()
+                .and_then(|ctx| ctx.device.id.as_ref())
+                .map(|id| id.to_string())
+            };
+            
+            self.spotify.start_context_playback(context, device_id.as_deref(), offset, None).await
           }
           Err(e) => {
             self.log_error(&format!("ERROR: Invalid playlist ID in URI '{}': {:?}", uri, e));
@@ -585,7 +596,15 @@ impl Network {
               rspotify::model::Offset::Uri(uri.clone())
             });
             
-            self.spotify.start_context_playback(context, None, offset, None).await
+            // Get current device ID from app state
+            let device_id = {
+              let app = self.app.lock().await;
+              app.current_playback_context.as_ref()
+                .and_then(|ctx| ctx.device.id.as_ref())
+                .map(|id| id.to_string())
+            };
+            
+            self.spotify.start_context_playback(context, device_id.as_deref(), offset, None).await
           }
           Err(e) => {
             self.log_error(&format!("ERROR: Invalid album ID in URI '{}': {:?}", uri, e));
@@ -599,7 +618,15 @@ impl Network {
             // For individual tracks, use start_uris_playback
             use rspotify::model::PlayableId;
             let track_ids = vec![PlayableId::Track(id)];
-            self.spotify.start_uris_playback(track_ids, None, None, None).await
+            // Get current device ID from app state
+            let device_id = {
+              let app = self.app.lock().await;
+              app.current_playback_context.as_ref()
+                .and_then(|ctx| ctx.device.id.as_ref())
+                .map(|id| id.to_string())
+            };
+            
+            self.spotify.start_uris_playback(track_ids, device_id.as_deref(), None, None).await
           }
           Err(e) => {
             self.log_error(&format!("ERROR: Invalid track ID in URI '{}': {:?}", uri, e));
@@ -613,7 +640,15 @@ impl Network {
     } else {
       // Resume current playback
       self.log_error("DEBUG: Resuming current playback");
-      self.spotify.resume_playback(None, None).await
+      // Get current device ID from app state
+      let device_id = {
+        let app = self.app.lock().await;
+        app.current_playback_context.as_ref()
+          .and_then(|ctx| ctx.device.id.as_ref())
+          .map(|id| id.to_string())
+      };
+      
+      self.spotify.resume_playback(device_id.as_deref(), None).await
     };
     
     match result {
@@ -729,7 +764,15 @@ impl Network {
   }
 
   async fn pause_playback(&mut self) {
-    match self.spotify.pause_playback(None).await {
+    // Get current device ID from app state
+    let device_id = {
+      let app = self.app.lock().await;
+      app.current_playback_context.as_ref()
+        .and_then(|ctx| ctx.device.id.as_ref())
+        .map(|id| id.to_string())
+    };
+    
+    match self.spotify.pause_playback(device_id.as_deref()).await {
       Ok(_) => {
         let mut app = self.app.lock().await;
         app.add_log_message("Playback paused".to_string());
@@ -767,7 +810,15 @@ impl Network {
   }
 
   async fn next_track(&mut self) {
-    match self.spotify.next_track(None).await {
+    // Get current device ID from app state
+    let device_id = {
+      let app = self.app.lock().await;
+      app.current_playback_context.as_ref()
+        .and_then(|ctx| ctx.device.id.as_ref())
+        .map(|id| id.to_string())
+    };
+    
+    match self.spotify.next_track(device_id.as_deref()).await {
       Ok(_) => {
         let mut app = self.app.lock().await;
         app.add_log_message("Skipped to next track".to_string());
@@ -789,7 +840,15 @@ impl Network {
   }
 
   async fn previous_track(&mut self) {
-    match self.spotify.previous_track(None).await {
+    // Get current device ID from app state
+    let device_id = {
+      let app = self.app.lock().await;
+      app.current_playback_context.as_ref()
+        .and_then(|ctx| ctx.device.id.as_ref())
+        .map(|id| id.to_string())
+    };
+    
+    match self.spotify.previous_track(device_id.as_deref()).await {
       Ok(_) => {
         let mut app = self.app.lock().await;
         app.add_log_message("Skipped to previous track".to_string());
@@ -812,7 +871,15 @@ impl Network {
 
   async fn seek(&mut self, position_ms: u32) {
     let duration = ChronoDuration::milliseconds(position_ms as i64);
-    match self.spotify.seek_track(duration, None).await {
+    // Get current device ID from app state
+    let device_id = {
+      let app = self.app.lock().await;
+      app.current_playback_context.as_ref()
+        .and_then(|ctx| ctx.device.id.as_ref())
+        .map(|id| id.to_string())
+    };
+    
+    match self.spotify.seek_track(duration, device_id.as_deref()).await {
       Ok(_) => {
         let mut app = self.app.lock().await;
         app.add_log_message(format!("Seeked to position: {}ms", position_ms));
@@ -833,7 +900,15 @@ impl Network {
   }
 
   async fn shuffle(&mut self, state: bool) {
-    match self.spotify.shuffle(state, None).await {
+    // Get current device ID from app state
+    let device_id = {
+      let app = self.app.lock().await;
+      app.current_playback_context.as_ref()
+        .and_then(|ctx| ctx.device.id.as_ref())
+        .map(|id| id.to_string())
+    };
+    
+    match self.spotify.shuffle(state, device_id.as_deref()).await {
       Ok(_) => {
         let mut app = self.app.lock().await;
         app.add_log_message(format!("Set shuffle to: {}", state));
@@ -855,7 +930,15 @@ impl Network {
 
   async fn repeat(&mut self, state: RepeatState) {
     let spotify_state: SpotifyRepeatState = state.into();
-    match self.spotify.repeat(spotify_state, None).await {
+    // Get current device ID from app state
+    let device_id = {
+      let app = self.app.lock().await;
+      app.current_playback_context.as_ref()
+        .and_then(|ctx| ctx.device.id.as_ref())
+        .map(|id| id.to_string())
+    };
+    
+    match self.spotify.repeat(spotify_state, device_id.as_deref()).await {
       Ok(_) => {
         let mut app = self.app.lock().await;
         app.add_log_message(format!("Set repeat to: {:?}", spotify_state));
@@ -892,6 +975,44 @@ impl Network {
           app.add_log_message(format!("Volume error: {}", e));
           app.handle_error(anyhow::anyhow!("Error setting volume: {}", e));
         }
+      }
+    }
+  }
+
+  async fn transfer_playback_to_device(&mut self, device_id: String) {
+    self.log_error(&format!("DEBUG: Transferring playback to device: {}", device_id));
+    
+    // Transfer playback with play=true to activate the device
+    match self.spotify.transfer_playback(&device_id, Some(true)).await {
+          Ok(_) => {
+            self.log_error("SUCCESS: Playback transferred to device");
+            let mut app = self.app.lock().await;
+            app.add_log_message(format!("Playback transferred to device"));
+            
+            // Store the active device ID for future playback commands
+            if let Some(devices) = &app.devices {
+              if let Some(device) = devices.devices.iter().find(|d| d.id.as_ref().map(|id| id.to_string()) == Some(device_id.to_string())) {
+                app.current_playback_context = Some(rspotify::model::CurrentPlaybackContext {
+                  device: device.clone(),
+                  repeat_state: rspotify::model::RepeatState::Off,
+                  shuffle_state: false,
+                  context: None,
+                  timestamp: chrono::Utc::now(),
+                  progress: None,
+                  is_playing: false,
+                  item: None,
+                  currently_playing_type: rspotify::model::CurrentlyPlayingType::Track,
+                  actions: rspotify::model::Actions {
+                    disallows: Vec::new(),
+                  },
+                });
+              }
+            }
+          }
+      Err(e) => {
+        self.log_error(&format!("ERROR transferring playback: {:?}", e));
+        let mut app = self.app.lock().await;
+        app.handle_error(anyhow::anyhow!("Failed to transfer playback: {}", e));
       }
     }
   }
