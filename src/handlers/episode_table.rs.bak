@@ -71,7 +71,7 @@ fn on_enter(app: &mut App) {
       .iter()
       .map(|episode| format!("spotify:track:{}", episode.id.to_string()).to_owned())
       .collect::<Vec<String>>();
-    app.dispatch(IoEvent::StartPlayback(None, None));
+    app.dispatch(IoEvent::StartPlayback(None));
   }
 }
 

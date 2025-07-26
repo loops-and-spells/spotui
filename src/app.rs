@@ -30,13 +30,15 @@ use ratatui::layout::Rect;
 
 use arboard::Clipboard;
 
-pub const LIBRARY_OPTIONS: [&str; 6] = [
+pub const LIBRARY_OPTIONS: [&str; 8] = [
   "Made For You",
   "Recently Played",
   "Liked Songs",
   "Albums",
   "Artists",
   "Podcasts",
+  "Top Tracks",
+  "Top Artists",
 ];
 
 const DEFAULT_ROUTE: Route = Route {
@@ -86,7 +88,7 @@ pub struct Library {
   pub saved_tracks: ScrollableResultPages<Page<SavedTrack>>,
   pub made_for_you_playlists: ScrollableResultPages<Page<SimplifiedPlaylist>>,
   pub saved_albums: ScrollableResultPages<Page<SavedAlbum>>,
-  pub saved_shows: ScrollableResultPages<Page<Show>>,
+  pub saved_shows: ScrollableResultPages<Page<SimplifiedShow>>,
   pub saved_artists: ScrollableResultPages<CursorBasedPage<FullArtist>>,
   pub show_episodes: ScrollableResultPages<Page<SimplifiedEpisode>>,
 }
@@ -616,6 +618,21 @@ impl App {
   pub fn add_log_message(&mut self, message: String) {
     let timestamp = chrono::Utc::now().format("%H:%M:%S");
     let formatted_message = format!("[{}] {}", timestamp, message);
+    
+    // Write to disk for debugging
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+      .create(true)
+      .append(true)
+      .open("/tmp/spotify-tui-log-stream.log") 
+    {
+      use std::io::Write;
+      let _ = writeln!(file, "=== LOG MESSAGE ===");
+      let _ = writeln!(file, "{}", formatted_message);
+      let _ = writeln!(file, "Raw message: {:?}", message);
+      let _ = writeln!(file, "Contains newlines: {}", message.contains('\n'));
+      let _ = writeln!(file, "==================\n");
+    }
+    
     self.log_messages.push(formatted_message);
     
     // Keep only the last 100 messages to prevent memory issues
@@ -646,7 +663,7 @@ impl App {
       self.dispatch(IoEvent::PausePlayback);
     } else {
       // When no offset or uris are passed, spotify will resume current playback
-      self.dispatch(IoEvent::StartPlayback(None));
+      self.dispatch(IoEvent::StartPlayback(None, None));
     }
   }
 
@@ -1120,7 +1137,7 @@ impl App {
       ActiveBlock::Podcasts => {
         if let Some(shows) = self.library.saved_shows.get_results(None) {
           if let Some(selected_show) = shows.items.get(self.shows_list_index) {
-            let show_id = selected_show.show.id.clone();
+            let show_id = selected_show.id.clone();
             // self.dispatch(IoEvent::CurrentUserSavedShowDelete(show_id);
           }
         }
@@ -1172,6 +1189,9 @@ impl App {
 
   fn made_for_you_search_and_add(&mut self, search_string: &str) {
     let user_country = self.get_user_country();
+    // TODO: Implement MadeForYouSearchAndAdd in network.rs
+    self.add_log_message(format!("'Made For You' playlist search not implemented - would search for: {}", search_string));
+    self.add_log_message("Tip: You can find these playlists in your regular playlist list".to_string());
     // self.dispatch(IoEvent::MadeForYouSearchAndAdd(
     //   search_string.to_string(),
     //   user_country,

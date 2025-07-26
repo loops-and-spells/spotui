@@ -306,7 +306,7 @@ fn handle_enter_event_on_selected_block(app: &mut App) {
           .map(|track| format!("spotify:track:{}", track.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string())))
           .collect::<Vec<String>>()
       });
-      app.dispatch(IoEvent::StartPlayback(None, None));
+      app.dispatch(IoEvent::StartPlayback(None));
     }
     SearchResultBlock::ArtistSearch => {
       if let Some(index) = &app.search_results.selected_artists_index {

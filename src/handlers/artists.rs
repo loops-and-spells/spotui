@@ -54,7 +54,8 @@ pub fn handler(key: Key, app: &mut App) {
       let artist = artists.get(app.artists_list_index);
       if let Some(artist) = artist {
         app.dispatch(IoEvent::StartPlayback(
-          Some(format!("spotify:artist:{}", artist.id))
+          Some(format!("spotify:artist:{}", artist.id)),
+          None
         ));
       }
     }

@@ -57,7 +57,7 @@ pub fn handler(key: Key, app: &mut App) {
           .map(|item| format!("spotify:track:{}", item.track.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string())))
           .collect();
 
-        app.dispatch(IoEvent::StartPlayback(None, None));
+        app.dispatch(IoEvent::StartPlayback(None));
       };
     }
     Key::Char('r') => {

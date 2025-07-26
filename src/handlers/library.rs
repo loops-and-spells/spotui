@@ -65,6 +65,16 @@ pub fn handler(key: Key, app: &mut App) {
         app.dispatch(IoEvent::GetCurrentUserSavedShows(None));
         app.push_navigation_stack(RouteId::Podcasts, ActiveBlock::Podcasts);
       }
+      // Top Tracks,
+      6 => {
+        app.dispatch(IoEvent::GetTopTracks);
+        app.push_navigation_stack(RouteId::TrackTable, ActiveBlock::TrackTable);
+      }
+      // Top Artists,
+      7 => {
+        app.dispatch(IoEvent::GetTopArtists);
+        app.push_navigation_stack(RouteId::Artists, ActiveBlock::Artists);
+      }
       // This is required because Rust can't tell if this pattern in exhaustive
       _ => {}
     },

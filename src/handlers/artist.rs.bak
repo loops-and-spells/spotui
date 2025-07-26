@@ -193,7 +193,7 @@ fn handle_enter_event_on_selected_block(app: &mut App) {
           .iter()
           .map(|track| format!("spotify:track:{}", track.id.as_ref().map(|id| id.to_string()).unwrap_or_else(|| "".to_string())).to_owned())
           .collect();
-        app.dispatch(IoEvent::StartPlayback(None, None));
+        app.dispatch(IoEvent::StartPlayback(None));
       }
       ArtistBlock::Albums => {
         if let Some(selected_album) = artist

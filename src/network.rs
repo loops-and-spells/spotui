@@ -21,6 +21,7 @@ use rspotify::{
     enums::{Country, RepeatState as SpotifyRepeatState, SearchType, AdditionalType},
   },
 };
+use serde_json;
 use std::{
   sync::Arc,
   time::{Duration, Instant, SystemTime},
@@ -46,7 +47,7 @@ pub enum IoEvent {
   GetEpisodes(String),
   GetRecommendations(String, String, String, String, String),
   GetSearchResults(String),
-  StartPlayback(Option<String>),
+  StartPlayback(Option<String>, Option<String>),
   PausePlayback,
   NextTrack,
   PreviousTrack,
@@ -71,6 +72,8 @@ pub enum IoEvent {
   GetCurrentUserSavedAlbums(Option<u32>),
   GetFollowedArtists(Option<String>),
   GetCurrentUserSavedShows(Option<u32>),
+  GetTopTracks,
+  GetTopArtists,
 }
 
 // Compatibility types
@@ -190,8 +193,8 @@ impl Network {
       IoEvent::GetPlaylistTracks(playlist_id, offset) => {
         self.get_playlist_tracks(&playlist_id, offset).await;
       }
-      IoEvent::StartPlayback(context_uri) => {
-        self.start_playback(context_uri.as_deref()).await;
+      IoEvent::StartPlayback(context_uri, offset) => {
+        self.start_playback(context_uri.as_deref(), offset).await;
       }
       IoEvent::PausePlayback => {
         self.pause_playback().await;
@@ -246,8 +249,7 @@ impl Network {
         // TODO: Implement GetAlbumForTrack
       }
       IoEvent::GetRecentlyPlayed => {
-        // TODO: Implement get recently played
-        // TODO: Implement GetRecentlyPlayed
+        self.get_recently_played().await;
       }
       IoEvent::GetCurrentSavedTracks(offset) => {
         self.get_current_saved_tracks(offset).await;
@@ -259,8 +261,13 @@ impl Network {
         self.get_followed_artists(after).await;
       }
       IoEvent::GetCurrentUserSavedShows(offset) => {
-        // TODO: Implement get current user saved shows
-        // TODO: Implement GetCurrentUserSavedShows
+        self.get_current_user_saved_shows(offset).await;
+      }
+      IoEvent::GetTopTracks => {
+        self.get_top_tracks().await;
+      }
+      IoEvent::GetTopArtists => {
+        self.get_top_artists().await;
       }
       // Add more handlers as needed
       _ => {
@@ -418,8 +425,27 @@ impl Network {
     app.track_table.selected_index = 0;
   }
 
-  async fn start_playback(&mut self, context_uri: Option<&str>) {
-    self.log_error(&format!("DEBUG: start_playback called with context_uri: {:?}", context_uri));
+  async fn start_playback(&mut self, context_uri: Option<&str>, offset_uri: Option<String>) {
+    self.log_error(&format!("DEBUG: start_playback called with context_uri: {:?}, offset_uri: {:?}", context_uri, offset_uri));
+    
+    // Add to log stream for visibility
+    {
+      let mut app = self.app.lock().await;
+      app.add_log_message(format!("Starting playback - Context: {:?}, Offset: {:?}", context_uri, offset_uri));
+    }
+    
+    // Log detailed information
+    if let Some(uri) = context_uri {
+      self.log_error(&format!("DEBUG: Context URI type: {}", 
+        if uri.contains("playlist") { "playlist" } 
+        else if uri.contains("album") { "album" } 
+        else if uri.contains("track") { "track" } 
+        else { "unknown" }
+      ));
+    }
+    if let Some(ref offset) = offset_uri {
+      self.log_error(&format!("DEBUG: Offset URI: {}", offset));
+    }
     
     let result = if let Some(uri) = context_uri {
       self.log_error(&format!("DEBUG: Starting playback with context URI: {}", uri));
@@ -432,7 +458,14 @@ impl Network {
             // Convert to PlayContextId 
             use rspotify::model::PlayContextId;
             let context = PlayContextId::Playlist(id);
-            self.spotify.start_context_playback(context, None, None, None).await
+            
+            // For playlists, if we have an offset_uri (track URI), use it
+            let offset = offset_uri.as_ref().map(|uri| {
+              self.log_error(&format!("DEBUG: Using track URI offset: {}", uri));
+              rspotify::model::Offset::Uri(uri.clone())
+            });
+            
+            self.spotify.start_context_playback(context, None, offset, None).await
           }
           Err(e) => {
             self.log_error(&format!("ERROR: Invalid playlist ID in URI '{}': {:?}", uri, e));
@@ -445,7 +478,13 @@ impl Network {
           Ok(id) => {
             use rspotify::model::PlayContextId;
             let context = PlayContextId::Album(id);
-            self.spotify.start_context_playback(context, None, None, None).await
+            // For albums, if we have an offset_uri (track URI), use it
+            let offset = offset_uri.as_ref().map(|uri| {
+              self.log_error(&format!("DEBUG: Using track URI offset for album: {}", uri));
+              rspotify::model::Offset::Uri(uri.clone())
+            });
+            
+            self.spotify.start_context_playback(context, None, offset, None).await
           }
           Err(e) => {
             self.log_error(&format!("ERROR: Invalid album ID in URI '{}': {:?}", uri, e));
@@ -487,8 +526,83 @@ impl Network {
         let error_msg = format!("ERROR: Failed to start playback: {:?}", e);
         self.log_error(&error_msg);
         
+        // Extract and format detailed error information
+        let error_str = format!("{:?}", e);
+        
+        // Handle both Http(StatusCode) and ApiError formats
+        if error_str.contains("Http(StatusCode(Response") {
+          // Extract status code
+          let status = if error_str.contains("status: 400") { 
+            "400 Bad Request" 
+          } else if error_str.contains("status: 403") { 
+            "403 Forbidden" 
+          } else if error_str.contains("status: 404") { 
+            "404 Not Found" 
+          } else { 
+            "Unknown Status" 
+          };
+          
+          let mut app = self.app.lock().await;
+          
+          // For now, add a simple error message since HTTP errors don't include body
+          app.add_log_message(format!("ERROR: Playback failed - {}", status));
+          app.add_log_message("Check that a Spotify device is active and try again".to_string());
+          
+          // Log the full error for debugging
+          self.log_error(&format!("Full HTTP error: {}", error_str));
+        }
+        // Try to extract and format the error response body if it exists
+        else if let Some(start) = error_str.find("ApiError(") {
+          if let Some(end) = error_str.rfind(')') {
+            let api_error = &error_str[start+9..end];
+            
+            // Log the error in parts for better readability
+            self.log_error("=== SPOTIFY API ERROR ===");
+            let api_status = if error_str.contains("status: 400") { "400 Bad Request" } else if error_str.contains("status: 403") { "403 Forbidden" } else { "Unknown" };
+            self.log_error(&format!("Status: {}", api_status));
+            
+            // Try to extract JSON body
+            if let Some(body_start) = api_error.find("body: Some(\"") {
+              if let Some(body_end) = api_error[body_start..].find("\")") {
+                let body = &api_error[body_start+12..body_start+body_end];
+                // Unescape the JSON string
+                let unescaped_body = body.replace("\\\"", "\"").replace("\\n", "\n");
+                
+                self.log_error("Response body:");
+                // Split into multiple lines for readability
+                for line in unescaped_body.lines() {
+                  self.log_error(&format!("  {}", line));
+                }
+                
+                // Try to parse and pretty print JSON
+                if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(&unescaped_body) {
+                  if let Ok(pretty_json) = serde_json::to_string_pretty(&json_value) {
+                    let mut app = self.app.lock().await;
+                    // Add the entire error as a single multi-line message
+                    let error_message = format!(
+                      "=== SPOTIFY API ERROR ({}) ===\n{}\n==========================================",
+                      api_status, pretty_json
+                    );
+                    app.add_log_message(error_message);
+                  }
+                }
+              }
+            }
+            
+            self.log_error("=========================");
+          }
+        }
+        
+        // Check if it's a 400 error
+        if error_msg.contains("status: 400") {
+          self.log_error("BAD REQUEST: The request format is incorrect");
+          let mut app = self.app.lock().await;
+          if !error_str.contains("body: Some") {
+            app.add_log_message(format!("Bad Request (400): {}", error_str));
+          }
+        }
         // Check if it's a 403 error which usually means Premium required or no active device
-        if error_msg.contains("status: 403") {
+        else if error_msg.contains("status: 403") {
           let user_error = "Playback failed: Spotify Premium subscription required. Please upgrade to Premium and ensure you have an active device (open Spotify and start playing music on any device).";
           self.log_error("PREMIUM REQUIRED: Playback control needs Spotify Premium");
           
@@ -720,19 +834,31 @@ impl Network {
     }
   }
 
-  async fn get_current_saved_tracks(&mut self, _offset: Option<u32>) {
+  async fn get_current_saved_tracks(&mut self, offset: Option<u32>) {
     self.log_error("DEBUG: Starting get_current_saved_tracks");
     use futures::{StreamExt, TryStreamExt};
     
+    // Create a stream starting from the offset
     let stream = self.spotify.current_user_saved_tracks(None);
-    let tracks: Result<Vec<_>, _> = stream.take(50).try_collect().await;
+    
+    // Skip to the offset if provided
+    let skip_count = offset.unwrap_or(0) as usize;
+    let tracks: Result<Vec<_>, _> = stream.skip(skip_count).take(50).try_collect().await;
     
     match tracks {
       Ok(saved_tracks) => {
         self.log_error(&format!("SUCCESS: Got {} saved tracks", saved_tracks.len()));
-        // Note: You may need to update the App struct to store saved tracks
-        // let mut app = self.app.lock().await;
-        // app.saved_tracks = Some(saved_tracks);
+        let mut app = self.app.lock().await;
+        
+        // For now, just set the tracks directly to the track table
+        app.track_table.tracks = saved_tracks.iter().map(|saved_track| {
+          saved_track.track.clone()
+        }).collect();
+        
+        // Set context so the UI knows we're showing saved tracks
+        app.track_table.context = Some(TrackTableContext::SavedTracks);
+        
+        app.add_log_message(format!("Loaded {} liked songs", saved_tracks.len()));
       }
       Err(e) => {
         let error_msg = format!("DETAILED ERROR getting saved tracks: {:?}", e);
@@ -745,19 +871,36 @@ impl Network {
     }
   }
 
-  async fn get_current_user_saved_albums(&mut self, _offset: Option<u32>) {
+  async fn get_current_user_saved_albums(&mut self, offset: Option<u32>) {
     self.log_error("DEBUG: Starting get_current_user_saved_albums");
     use futures::{StreamExt, TryStreamExt};
     
     let stream = self.spotify.current_user_saved_albums(None);
-    let albums: Result<Vec<_>, _> = stream.take(50).try_collect().await;
+    let skip_count = offset.unwrap_or(0) as usize;
+    let albums: Result<Vec<_>, _> = stream.skip(skip_count).take(50).try_collect().await;
     
     match albums {
       Ok(saved_albums) => {
         self.log_error(&format!("SUCCESS: Got {} saved albums", saved_albums.len()));
-        // Note: You may need to update the App struct to store saved albums
-        // let mut app = self.app.lock().await;
-        // app.saved_albums = Some(saved_albums);
+        let mut app = self.app.lock().await;
+        
+        // Create a Page-like structure for the UI
+        use rspotify::model::page::Page;
+        let page = Page {
+          items: saved_albums,
+          total: 0, // We don't have the total from stream
+          limit: 50,
+          offset: offset.unwrap_or(0),
+          href: String::new(),
+          next: None,
+          previous: None,
+        };
+        
+        // Store the page in the library
+        app.library.saved_albums.add_pages(page);
+        
+        let album_count = app.library.saved_albums.get_results(None).map(|p| p.items.len()).unwrap_or(0);
+        app.add_log_message(format!("Loaded {} saved albums", album_count));
       }
       Err(e) => {
         let error_msg = format!("DETAILED ERROR getting saved albums: {:?}", e);
@@ -770,14 +913,20 @@ impl Network {
     }
   }
 
-  async fn get_followed_artists(&mut self, _after: Option<String>) {
+  async fn get_followed_artists(&mut self, after: Option<String>) {
     self.log_error("DEBUG: Starting get_followed_artists");
-    match self.spotify.current_user_followed_artists(None, Some(50)).await {
-      Ok(followed_artists) => {
-        self.log_error(&format!("SUCCESS: Got {} followed artists", followed_artists.items.len()));
-        // Note: You may need to update the App struct to store followed artists
-        // let mut app = self.app.lock().await;
-        // app.followed_artists = Some(followed_artists);
+    match self.spotify.current_user_followed_artists(after.as_deref(), Some(50)).await {
+      Ok(cursor_page) => {
+        self.log_error(&format!("SUCCESS: Got {} followed artists", cursor_page.items.len()));
+        let mut app = self.app.lock().await;
+        
+        // Store the artists - saved_artists expects a CursorBasedPage
+        app.library.saved_artists.add_pages(cursor_page.clone());
+        
+        // Also populate the artists vec for the UI
+        app.artists = cursor_page.items.clone();
+        
+        app.add_log_message(format!("Loaded {} followed artists", cursor_page.items.len()));
       }
       Err(e) => {
         let error_msg = format!("DETAILED ERROR getting followed artists: {:?}", e);
@@ -786,6 +935,95 @@ impl Network {
         self.log_error(&type_msg);
         let mut app = self.app.lock().await;
         app.handle_error(anyhow::anyhow!("Failed to load followed artists: {}", e));
+      }
+    }
+  }
+
+  async fn get_recently_played(&mut self) {
+    self.log_error("DEBUG: Starting get_recently_played");
+    
+    // Get the last 50 recently played tracks
+    match self.spotify.current_user_recently_played(Some(50), None).await {
+      Ok(history) => {
+        self.log_error(&format!("SUCCESS: Got {} recently played tracks", history.items.len()));
+        let mut app = self.app.lock().await;
+        
+        // Store recently played in the app state
+        app.recently_played.result = Some(history);
+        
+        let track_count = app.recently_played.result.as_ref().map(|h| h.items.len()).unwrap_or(0);
+        app.add_log_message(format!("Loaded {} recently played tracks", track_count));
+      }
+      Err(e) => {
+        let error_msg = format!("DETAILED ERROR getting recently played: {:?}", e);
+        let type_msg = format!("Error type: {}", std::any::type_name_of_val(&e));
+        self.log_error(&error_msg);
+        self.log_error(&type_msg);
+        let mut app = self.app.lock().await;
+        app.handle_error(anyhow::anyhow!("Failed to load recently played tracks: {}", e));
+      }
+    }
+  }
+
+  async fn get_current_user_saved_shows(&mut self, _offset: Option<u32>) {
+    self.log_error("DEBUG: Starting get_current_user_saved_shows");
+    let mut app = self.app.lock().await;
+    app.add_log_message("Podcasts feature requires additional work - the API returns a different Show type than expected".to_string());
+    // TODO: The get_saved_show API returns Show, but the UI expects SimplifiedShow
+    // This would require converting between the types or updating the UI
+  }
+
+  async fn get_top_tracks(&mut self) {
+    self.log_error("DEBUG: Starting get_top_tracks");
+    use rspotify::model::enums::TimeRange;
+    
+    // Get medium term (6 months) by default
+    match self.spotify.current_user_top_tracks_manual(Some(TimeRange::MediumTerm), Some(50), Some(0)).await {
+      Ok(page) => {
+        self.log_error(&format!("SUCCESS: Got {} top tracks", page.items.len()));
+        let mut app = self.app.lock().await;
+        
+        // Set the tracks directly to the track table
+        app.track_table.tracks = page.items.clone();
+        
+        // Set context so the UI knows we're showing top tracks
+        app.track_table.context = Some(TrackTableContext::SavedTracks); // Using SavedTracks context for now
+        
+        app.add_log_message(format!("Loaded {} top tracks (last 6 months)", page.items.len()));
+      }
+      Err(e) => {
+        let error_msg = format!("DETAILED ERROR getting top tracks: {:?}", e);
+        let type_msg = format!("Error type: {}", std::any::type_name_of_val(&e));
+        self.log_error(&error_msg);
+        self.log_error(&type_msg);
+        let mut app = self.app.lock().await;
+        app.handle_error(anyhow::anyhow!("Failed to load top tracks: {}", e));
+      }
+    }
+  }
+
+  async fn get_top_artists(&mut self) {
+    self.log_error("DEBUG: Starting get_top_artists");
+    use rspotify::model::enums::TimeRange;
+    
+    // Get medium term (6 months) by default
+    match self.spotify.current_user_top_artists_manual(Some(TimeRange::MediumTerm), Some(50), Some(0)).await {
+      Ok(page) => {
+        self.log_error(&format!("SUCCESS: Got {} top artists", page.items.len()));
+        let mut app = self.app.lock().await;
+        
+        // Set the artists directly
+        app.artists = page.items.clone();
+        
+        app.add_log_message(format!("Loaded {} top artists (last 6 months)", page.items.len()));
+      }
+      Err(e) => {
+        let error_msg = format!("DETAILED ERROR getting top artists: {:?}", e);
+        let type_msg = format!("Error type: {}", std::any::type_name_of_val(&e));
+        self.log_error(&error_msg);
+        self.log_error(&type_msg);
+        let mut app = self.app.lock().await;
+        app.handle_error(anyhow::anyhow!("Failed to load top artists: {}", e));
       }
     }
   }

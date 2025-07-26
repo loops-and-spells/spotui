@@ -108,22 +108,41 @@ pub fn draw_input_and_help_box<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
   f.render_widget(input, chunks[0]);
 
   let show_loading = app.is_loading && app.user_config.behavior.show_loading_indicator;
-  let status_text = if show_loading {
-    (app.user_config.theme.hint, "Loading...")
+  
+  let (device_text, text_color) = if show_loading {
+    ("Loading...".to_string(), app.user_config.theme.hint)
+  } else if let Some(context) = &app.current_playback_context {
+    (context.device.name.clone(), app.user_config.theme.active)
+  } else if let Some(devices) = &app.devices {
+    if devices.devices.is_empty() {
+      ("NO DEVICES".to_string(), Color::Red)
+    } else if let Some(idx) = app.selected_device_index {
+      if let Some(device) = devices.devices.get(idx) {
+        (device.name.clone(), app.user_config.theme.inactive)
+      } else if let Some(first_device) = devices.devices.first() {
+        (first_device.name.clone(), app.user_config.theme.inactive)
+      } else {
+        ("NO DEVICES".to_string(), Color::Red)
+      }
+    } else if let Some(first_device) = devices.devices.first() {
+      (first_device.name.clone(), app.user_config.theme.inactive)
+    } else {
+      ("NO DEVICES".to_string(), Color::Red)
+    }
   } else {
-    (app.user_config.theme.inactive, "Press 'l' for log stream")
+    ("NO DEVICES".to_string(), Color::Red)
   };
 
   let block = Block::default()
-    .title(Span::styled("Status", Style::default().fg(status_text.0)))
+    .title(Span::styled("Device", Style::default().fg(text_color)))
     .borders(Borders::ALL)
-    .border_style(Style::default().fg(status_text.0));
+    .border_style(Style::default().fg(text_color));
 
-  let lines = Text::from(status_text.1);
-  let status = Paragraph::new(lines)
+  let lines = Text::from(device_text.as_str());
+  let device_display = Paragraph::new(lines)
     .block(block)
-    .style(Style::default().fg(status_text.0));
-  f.render_widget(status, chunks[1]);
+    .style(Style::default().fg(text_color));
+  f.render_widget(device_display, chunks[1]);
 }
 
 pub fn draw_main_layout(f: &mut Frame, app: &App) {
@@ -560,10 +579,10 @@ pub fn draw_podcast_table<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
       .items
       .iter()
       .map(|show_page| TableItem {
-        id: show_page.show.id.to_string(),
+        id: show_page.id.to_string(),
         format: vec![
-          show_page.show.name.to_owned(),
-          show_page.show.publisher.to_owned(),
+          show_page.name.to_owned(),
+          show_page.publisher.to_owned(),
         ],
       })
       .collect::<Vec<TableItem>>();
@@ -1219,10 +1238,18 @@ pub fn draw_device_list(f: &mut Frame, app: &App) {
   let list = List::new(items)
     .block(
       Block::default()
-        .title(Span::styled(
-          "Devices",
-          Style::default().fg(app.user_config.theme.active),
-        ))
+        .title(Line::from(vec![
+          Span::styled(
+            "D",
+            Style::default()
+              .fg(app.user_config.theme.active)
+              .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+          ),
+          Span::styled(
+            "evices",
+            Style::default().fg(app.user_config.theme.active),
+          ),
+        ]))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.user_config.theme.inactive))
     )
@@ -1770,7 +1797,7 @@ pub fn draw_log_stream<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
     app.log_messages[start_index..end_index]
       .iter()
       .enumerate()
-      .map(|(i, message)| {
+      .flat_map(|(i, message)| {
         let actual_index = start_index + i;
         // Check if this is an error message and style accordingly
         let is_error = message.contains("] ERROR:");
@@ -1794,7 +1821,10 @@ pub fn draw_log_stream<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
           Style::default().fg(app.user_config.theme.text)
         };
         
-        ListItem::new(Span::styled(message, style))
+        // Split the message by newlines and create a ListItem for each line
+        message.lines().map(move |line| {
+          ListItem::new(Span::styled(line.to_string(), style))
+        }).collect::<Vec<_>>()
       })
       .collect()
   };
@@ -1806,18 +1836,37 @@ pub fn draw_log_stream<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
   };
 
   let title = if is_active {
-    format!("Log Stream [{}/{}]", app.log_stream_selected_index + 1, app.log_messages.len())
+    Line::from(vec![
+      Span::styled(
+        "L",
+        Style::default()
+          .fg(app.user_config.theme.header)
+          .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+      ),
+      Span::styled(
+        format!("og Stream [{}/{}]", app.log_stream_selected_index + 1, app.log_messages.len()),
+        Style::default().fg(app.user_config.theme.header),
+      ),
+    ])
   } else {
-    "Log Stream".to_string()
+    Line::from(vec![
+      Span::styled(
+        "L",
+        Style::default()
+          .fg(app.user_config.theme.header)
+          .add_modifier(Modifier::BOLD | Modifier::UNDERLINED),
+      ),
+      Span::styled(
+        "og Stream",
+        Style::default().fg(app.user_config.theme.header),
+      ),
+    ])
   };
 
   let log_list = List::new(log_items)
     .block(
       Block::default()
-        .title(Span::styled(
-          title,
-          Style::default().fg(app.user_config.theme.header),
-        ))
+        .title(title)
         .borders(Borders::ALL)
         .border_style(border_style)
     )

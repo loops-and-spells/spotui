@@ -54,7 +54,7 @@ impl<'a> CliApp<'a> {
     }
     self
       .net
-      .handle_network_event(IoEvent::StartPlayback(None, None))
+      .handle_network_event(IoEvent::StartPlayback(None))
       .await;
   }
 
@@ -492,7 +492,7 @@ impl<'a> CliApp<'a> {
     } else {
       self
         .net
-        .handle_network_event(IoEvent::StartPlayback(Some(uri.clone(, None))))
+        .handle_network_event(IoEvent::StartPlayback(Some(uri.clone())))
         .await;
     }
   }

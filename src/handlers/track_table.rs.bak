@@ -224,7 +224,7 @@ fn play_random_song(app: &mut App) {
           // Note: playlist.tracks structure changed in newer API
           if let Some(_num_tracks) = Some(0usize) {
             let uri = Some(format!("spotify:playlist:{}", playlist.id.to_string()));
-            app.dispatch(IoEvent::StartPlayback(uri, None));
+            app.dispatch(IoEvent::StartPlayback(uri));
           };
         };
       }
@@ -308,18 +308,9 @@ fn on_enter(app: &mut App) {
             _ => None,
           };
 
-          // For playlists, we need to pass the track URI as offset to play specific track
-          let track_uri = tracks.get(*selected_index).and_then(|track| {
-            track.id.as_ref().map(|id| {
-              let id_str = id.to_string();
-              if id_str.starts_with("spotify:track:") {
-                id_str
-              } else {
-                format!("spotify:track:{}", id_str)
-              }
-            })
-          });
-          app.dispatch(IoEvent::StartPlayback(context_uri, track_uri));
+          // Calculate the absolute track index including pagination offset
+          let absolute_index = app.playlist_offset as usize + *selected_index;
+          app.dispatch(IoEvent::StartPlayback(context_uri, Some(absolute_index)));
         };
       }
       TrackTableContext::RecommendedTracks => {
@@ -374,18 +365,7 @@ fn on_enter(app: &mut App) {
               .to_string()
           ));
 
-          // For playlists, we need to pass the track URI as offset to play specific track
-          let track_uri = tracks.get(*selected_index).and_then(|track| {
-            track.id.as_ref().map(|id| {
-              let id_str = id.to_string();
-              if id_str.starts_with("spotify:track:") {
-                id_str
-              } else {
-                format!("spotify:track:{}", id_str)
-              }
-            })
-          });
-          app.dispatch(IoEvent::StartPlayback(context_uri, track_uri));
+          app.dispatch(IoEvent::StartPlayback(context_uri, None));
         }
       }
     },
