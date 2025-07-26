@@ -27,6 +27,7 @@ pub struct UserTheme {
   pub selected: Option<String>,
   pub text: Option<String>,
   pub header: Option<String>,
+  pub focus_letter: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -47,6 +48,7 @@ pub struct Theme {
   pub selected: Color,
   pub text: Color,
   pub header: Color,
+  pub focus_letter: Color,
 }
 
 impl Default for Theme {
@@ -68,6 +70,7 @@ impl Default for Theme {
       selected: Color::LightCyan,
       text: Color::Reset,
       header: Color::Reset,
+      focus_letter: Color::Yellow,
     }
   }
 }
@@ -391,6 +394,7 @@ impl UserConfig {
     to_theme_item!(selected);
     to_theme_item!(text);
     to_theme_item!(header);
+    to_theme_item!(focus_letter);
     Ok(())
   }
 

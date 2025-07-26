@@ -3,6 +3,7 @@ mod banner;
 // mod cli;  // TODO: Re-enable after fixing clap compatibility
 mod config;
 mod event;
+mod focus_manager;
 mod handlers;
 mod network;  // Temporary minimal network module
 mod redirect_uri;
@@ -464,11 +465,13 @@ async fn start_ui(user_config: UserConfig, app: &Arc<Mutex<App>>) -> Result<()> 
       1
     };
 
-    // Put the cursor back inside the input box
-    terminal.backend_mut().execute(MoveTo(
-      cursor_offset + app.input_cursor_position,
-      cursor_offset,
-    ))?;
+    // Put the cursor back inside the input box only if Input is active
+    if app.get_current_route().active_block == ActiveBlock::Input {
+      terminal.backend_mut().execute(MoveTo(
+        cursor_offset + app.input_cursor_position,
+        cursor_offset,
+      ))?;
+    }
 
     // Handle authentication refresh
     if SystemTime::now() > app.spotify_token_expiry {
@@ -483,22 +486,20 @@ async fn start_ui(user_config: UserConfig, app: &Arc<Mutex<App>>) -> Result<()> 
 
         let current_active_block = app.get_current_route().active_block;
 
-        // To avoid swallowing the global key presses `q` and `-` make a special
+        // To avoid swallowing global key presses make a special
         // case for the input handler
         if current_active_block == ActiveBlock::Input {
           handlers::input_handler(key, &mut app);
         } else if key == app.user_config.keys.back {
           if app.get_current_route().active_block != ActiveBlock::Input {
-            // Go back through navigation stack when not in search input mode and exit the app if there are no more places to back to
-
-            let pop_result = match app.pop_navigation_stack() {
+            // Go back through navigation stack when not in search input mode
+            // NOTE: Unlike before, we do NOT exit the app - only Ctrl-C should do that
+            let _pop_result = match app.pop_navigation_stack() {
               Some(ref x) if x.id == RouteId::Search => app.pop_navigation_stack(),
               Some(x) => Some(x),
               None => None,
             };
-            if pop_result.is_none() {
-              break; // Exit application
-            }
+            // Removed: if pop_result.is_none() { break; } - no longer exit on 'q'
           }
         } else {
           handlers::handle_app(key, &mut app);

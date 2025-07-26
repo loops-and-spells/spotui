@@ -23,6 +23,7 @@ mod track_table;
 
 use super::app::{ActiveBlock, App, ArtistBlock, RouteId, SearchResultBlock};
 use crate::event::Key;
+use crate::focus_manager::ComponentId;
 use crate::network::IoEvent;
 use rspotify::model::{context::CurrentPlaybackContext, PlayableItem};
 use crate::network::PlayingItem;
@@ -34,6 +35,28 @@ pub fn handle_app(key: Key, app: &mut App) {
   match key {
     Key::Esc => {
       handle_escape(app);
+    }
+    // Component entry shortcuts - enter components directly for internal navigation
+    Key::Char('L') | Key::Char('l') => {
+      app.enter_component(ComponentId::Library);
+      app.set_current_route_state(Some(ActiveBlock::Library), Some(ActiveBlock::Library));
+    }
+    Key::Char('P') | Key::Char('p') => {
+      app.enter_component(ComponentId::MyPlaylists);
+      app.set_current_route_state(Some(ActiveBlock::MyPlaylists), Some(ActiveBlock::MyPlaylists));
+    }
+    Key::Char('S') | Key::Char('s') => {
+      app.enter_component(ComponentId::SearchInput);
+      app.set_current_route_state(Some(ActiveBlock::Input), Some(ActiveBlock::Input));
+      // Clear any existing search results focus to avoid dual focus
+      app.search_results.selected_block = SearchResultBlock::Empty;
+      app.search_results.hovered_block = SearchResultBlock::Empty;
+    }
+    Key::Char('D') => {
+      app.set_current_route_state(Some(ActiveBlock::SelectDevice), Some(ActiveBlock::SelectDevice));
+    }
+    Key::Char('O') => {
+      app.push_navigation_stack(RouteId::LogStream, ActiveBlock::LogStream);
     }
     _ if key == app.user_config.keys.jump_to_album => {
       handle_jump_to_album(app);
@@ -82,6 +105,9 @@ pub fn handle_app(key: Key, app: &mut App) {
     }
     _ if key == app.user_config.keys.search => {
       app.set_current_route_state(Some(ActiveBlock::Input), Some(ActiveBlock::Input));
+      // Clear any existing search results focus to avoid dual focus
+      app.search_results.selected_block = SearchResultBlock::Empty;
+      app.search_results.hovered_block = SearchResultBlock::Empty;
     }
     _ if key == app.user_config.keys.copy_song_url => {
       app.copy_song_url();
@@ -94,9 +120,6 @@ pub fn handle_app(key: Key, app: &mut App) {
     }
     _ if key == app.user_config.keys.basic_view => {
       app.push_navigation_stack(RouteId::BasicView, ActiveBlock::BasicView);
-    }
-    Key::Char('l') => {
-      app.push_navigation_stack(RouteId::LogStream, ActiveBlock::LogStream);
     }
     _ => handle_block_events(key, app),
   }
@@ -178,12 +201,16 @@ fn handle_block_events(key: Key, app: &mut App) {
 fn handle_escape(app: &mut App) {
   match app.get_current_route().active_block {
     ActiveBlock::SearchResultBlock => {
+      // Clear search results focus using centralized system
+      app.clear_all_focus();
       app.search_results.selected_block = SearchResultBlock::Empty;
+      app.search_results.hovered_block = SearchResultBlock::Empty;
     }
     ActiveBlock::ArtistBlock => {
       if let Some(artist) = &mut app.artist {
         artist.artist_selected_block = ArtistBlock::Empty;
       }
+      app.clear_focus();
     }
     ActiveBlock::Dialog(_) => {
       app.pop_navigation_stack();
@@ -192,11 +219,14 @@ fn handle_escape(app: &mut App) {
     ActiveBlock::SelectDevice => {
       app.pop_navigation_stack();
     }
-    ActiveBlock::Analysis => {}
+    ActiveBlock::Analysis => {
+      app.clear_focus();
+    }
     ActiveBlock::LogStream => {
       app.pop_navigation_stack();
     }
     _ => {
+      app.clear_all_focus();
       app.set_current_route_state(Some(ActiveBlock::Empty), None);
     }
   }

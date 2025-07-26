@@ -15,7 +15,7 @@ pub fn handler(key: Key, app: &mut App) {
         }
       }
     }
-    Key::Char('q') => {
+    Key::Esc => {
       app.pop_navigation_stack();
     }
     Key::Right => app.confirm = !app.confirm,

@@ -2,6 +2,7 @@ extern crate unicode_width;
 
 use super::super::app::{ActiveBlock, App, RouteId};
 use crate::event::Key;
+use crate::focus_manager::ComponentId;
 use crate::network::IoEvent;
 use std::convert::TryInto;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
@@ -66,6 +67,7 @@ pub fn handler(key: Key, app: &mut App) {
       }
     }
     Key::Esc => {
+      app.clear_all_focus();
       app.set_current_route_state(Some(ActiveBlock::Empty), Some(ActiveBlock::Library));
     }
     Key::Enter => {
@@ -111,7 +113,25 @@ fn process_input(app: &mut App, input: String) {
 
   // Default fallback behavior: treat the input as a raw search phrase.
   app.dispatch(IoEvent::GetSearchResults(input));
+  
+  // Clear the input field after search
+  app.input = vec![];
+  app.input_idx = 0;
+  app.input_cursor_position = 0;
+  
+  // Navigate to search results
   app.push_navigation_stack(RouteId::Search, ActiveBlock::SearchResultBlock);
+  
+  // IMPORTANT: Force the route state to SearchResultBlock even if we're already on Search route
+  // This ensures keyboard input goes to search results, not the input field
+  app.set_current_route_state(Some(ActiveBlock::SearchResultBlock), Some(ActiveBlock::SearchResultBlock));
+  
+  // Focus on Songs search result panel for quick navigation
+  app.search_results.selected_block = super::super::app::SearchResultBlock::SongSearch;
+  app.search_results.hovered_block = super::super::app::SearchResultBlock::SongSearch;
+  
+  // Use focus manager to track this properly
+  app.enter_component(ComponentId::SearchResults(super::super::app::SearchResultBlock::SongSearch));
 }
 
 fn spotify_resource_id(base: &str, uri: &str, sep: &str, resource_type: &str) -> (String, bool) {

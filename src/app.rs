@@ -1,5 +1,6 @@
 use super::user_config::UserConfig;
 use crate::network::IoEvent;
+use crate::focus_manager::{FocusManager, ComponentId, FocusState};
 use rspotify::model::PlayableItem;
 use anyhow::anyhow;
 use rspotify::{
@@ -93,7 +94,7 @@ pub struct Library {
   pub show_episodes: ScrollableResultPages<Page<SimplifiedEpisode>>,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum SearchResultBlock {
   AlbumSearch,
   SongSearch,
@@ -103,7 +104,7 @@ pub enum SearchResultBlock {
   Empty,
 }
 
-#[derive(PartialEq, Debug, Clone)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum ArtistBlock {
   TopTracks,
   Albums,
@@ -111,8 +112,9 @@ pub enum ArtistBlock {
   Empty,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum DialogContext {
+  #[default]
   PlaylistWindow,
   PlaylistSearch,
 }
@@ -331,6 +333,7 @@ pub struct App {
   pub log_messages: Vec<String>,
   pub log_stream_selected_index: usize,
   pub log_stream_scroll_offset: usize,
+  pub focus_manager: FocusManager,
 }
 
 impl Default for App {
@@ -419,6 +422,7 @@ impl Default for App {
       log_messages: Vec::new(),
       log_stream_selected_index: 0,
       log_stream_scroll_offset: 0,
+      focus_manager: FocusManager::new(),
     }
   }
 }
@@ -729,6 +733,72 @@ impl App {
   pub fn get_current_route(&self) -> &Route {
     // if for some reason there is no route return the default
     self.navigation_stack.last().unwrap_or(&DEFAULT_ROUTE)
+  }
+
+  pub fn get_navigation_breadcrumb(&self) -> String {
+    let mut breadcrumb_parts = Vec::new();
+    
+    for route in &self.navigation_stack {
+      let part = match route.id {
+        RouteId::Home => "Library",
+        RouteId::TrackTable => {
+          match self.track_table.context.as_ref() {
+            Some(TrackTableContext::MyPlaylists) => {
+              if let Some(selected_playlist_index) = self.selected_playlist_index {
+                if let Some(playlists) = &self.playlists {
+                  playlists.items.get(selected_playlist_index)
+                    .map(|p| p.name.as_str())
+                    .unwrap_or("Playlist")
+                } else {
+                  "Playlist"
+                }
+              } else {
+                "Tracks"
+              }
+            }
+            Some(TrackTableContext::SavedTracks) => "Liked Songs",
+            Some(TrackTableContext::RecommendedTracks) => "Recommended",
+            Some(TrackTableContext::MadeForYou) => {
+              if let Some(playlists) = &self.library.made_for_you_playlists.get_results(None) {
+                playlists.items.get(self.made_for_you_index)
+                  .map(|p| p.name.as_str())
+                  .unwrap_or("Made For You")
+              } else {
+                "Made For You"
+              }
+            }
+            Some(TrackTableContext::AlbumSearch) => "Album",
+            Some(TrackTableContext::PlaylistSearch) => "Search Results",
+            None => "Tracks",
+          }
+        }
+        RouteId::AlbumTracks => "Album",
+        RouteId::AlbumList => "Albums",
+        RouteId::Artist => {
+          if let Some(artist) = &self.artist {
+            &artist.artist_name
+          } else {
+            "Artist"
+          }
+        }
+        RouteId::RecentlyPlayed => "Recently Played",
+        RouteId::Search => "Search",
+        RouteId::Artists => "Artists",
+        RouteId::MadeForYou => "Made For You",
+        RouteId::Podcasts => "Podcasts",
+        RouteId::PodcastEpisodes => "Episodes",
+        RouteId::Recommendations => "Recommendations",
+        RouteId::Analysis => "Audio Analysis",
+        RouteId::BasicView => "Basic View",
+        RouteId::LogStream => "Log Stream",
+        RouteId::SelectedDevice => "Devices",
+        RouteId::Error => "Error",
+        RouteId::Dialog => "Dialog",
+      };
+      breadcrumb_parts.push(part.to_string());
+    }
+    
+    breadcrumb_parts.join(" > ")
   }
 
   fn get_current_route_mut(&mut self) -> &mut Route {
@@ -1278,6 +1348,68 @@ impl App {
       .user
       .to_owned()
       .and_then(|user| user.country)
+  }
+
+  // Focus Manager Methods
+  
+  /// Set focus to a component using the centralized focus manager
+  pub fn focus_component(&mut self, component: ComponentId) {
+    self.focus_manager.set_focus(component);
+  }
+
+  /// Set hover to a component using the centralized focus manager
+  pub fn hover_component(&mut self, component: ComponentId) {
+    self.focus_manager.set_hover(component);
+  }
+
+  /// Navigate to a component (sets hover, not focus)
+  pub fn navigate_to_component(&mut self, component: ComponentId) {
+    self.focus_manager.navigate_to(component);
+  }
+
+  /// Enter a component directly (sets both focus and hover)
+  pub fn enter_component(&mut self, component: ComponentId) {
+    self.focus_manager.enter_component(component);
+  }
+
+  /// Clear focus while keeping hover
+  pub fn clear_focus(&mut self) {
+    self.focus_manager.clear_focus();
+  }
+
+  /// Clear hover
+  pub fn clear_hover(&mut self) {
+    self.focus_manager.clear_hover();
+  }
+
+  /// Clear all focus states
+  pub fn clear_all_focus(&mut self) {
+    self.focus_manager.clear_all();
+  }
+
+  /// Get focus state of a component
+  pub fn get_component_focus_state(&self, component: &ComponentId) -> FocusState {
+    self.focus_manager.get_focus_state(component)
+  }
+
+  /// Check if component is focused
+  pub fn is_component_focused(&self, component: &ComponentId) -> bool {
+    self.focus_manager.is_focused(component)
+  }
+
+  /// Check if component is hovered
+  pub fn is_component_hovered(&self, component: &ComponentId) -> bool {
+    self.focus_manager.is_hovered(component)
+  }
+
+  /// Get currently focused component
+  pub fn get_focused_component(&self) -> Option<&ComponentId> {
+    self.focus_manager.get_focused()
+  }
+
+  /// Get currently hovered component
+  pub fn get_hovered_component(&self) -> Option<&ComponentId> {
+    self.focus_manager.get_hovered()
   }
 
 }

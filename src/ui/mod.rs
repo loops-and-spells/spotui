@@ -6,6 +6,7 @@ use super::{
     RouteId, SearchResultBlock, LIBRARY_OPTIONS,
   },
   banner::BANNER,
+  user_config::Theme,
 };
 use rspotify::model::show::ResumePoint;
 use crate::network::{PlayingItem, RepeatState};
@@ -84,6 +85,29 @@ fn create_styled_block<'a>(title: &'a str, highlight_color: Color) -> Block<'a> 
     .border_style(Style::default().fg(highlight_color))
 }
 
+/// Create a title with the first letter styled for focus
+fn create_focus_title<'a>(title: &'a str, theme: &Theme, highlight_state: (bool, bool)) -> Vec<Span<'a>> {
+  if title.is_empty() {
+    return vec![Span::raw(title)];
+  }
+  
+  let first_char = &title[0..1];
+  let rest = if title.len() > 1 { &title[1..] } else { "" };
+  
+  vec![
+    Span::styled(
+      first_char,
+      Style::default()
+        .fg(theme.focus_letter)
+        .add_modifier(Modifier::BOLD),
+    ),
+    Span::styled(
+      rest,
+      get_color(highlight_state, *theme),
+    ),
+  ]
+}
+
 
 pub fn draw_input_and_help_box<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
 {
@@ -109,14 +133,12 @@ pub fn draw_input_and_help_box<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
 
   let input_string: String = app.input.iter().collect();
   let lines = Text::from((&input_string).as_str());
+  let search_title_spans = create_focus_title("Search", &app.user_config.theme, highlight_state);
   let input = Paragraph::new(lines).block(
     Block::default()
       .borders(Borders::ALL)
       .border_type(BorderType::Rounded)
-      .title(Span::styled(
-        "Search",
-        get_color(highlight_state, app.user_config.theme),
-      ))
+      .title(Line::from(search_title_spans))
       .border_style(get_color(highlight_state, app.user_config.theme))
   );
   f.render_widget(input, chunks[0]);
@@ -143,8 +165,14 @@ pub fn draw_input_and_help_box<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
     ("NO DEVICES".to_string(), Color::Red)
   };
 
+  let device_highlight_state = (
+    current_route.active_block == ActiveBlock::SelectDevice,
+    current_route.hovered_block == ActiveBlock::SelectDevice,
+  );
+  
+  let device_title_spans = create_focus_title("Device", &app.user_config.theme, device_highlight_state);
   let block = Block::default()
-    .title(Span::styled("Device", Style::default().fg(text_color).add_modifier(Modifier::BOLD)))
+    .title(Line::from(device_title_spans))
     .borders(Borders::ALL)
     .border_type(BorderType::Rounded)
     .border_style(Style::default().fg(text_color));
@@ -206,6 +234,22 @@ pub fn draw_main_layout(f: &mut Frame, app: &App) {
   draw_dialog::<CrosstermBackend<std::io::Stdout>>(f, app);
 }
 
+pub fn draw_breadcrumb_box(f: &mut Frame, app: &App, layout_chunk: Rect) {
+  let breadcrumb_text = app.get_navigation_breadcrumb();
+  
+  let block = Block::default()
+    .borders(Borders::ALL)
+    .border_type(BorderType::Rounded)
+    .border_style(Style::default().fg(app.user_config.theme.inactive));
+
+  let lines = Text::from(breadcrumb_text.as_str());
+  let breadcrumb = Paragraph::new(lines)
+    .block(block)
+    .style(Style::default().fg(app.user_config.theme.text));
+  
+  f.render_widget(breadcrumb, layout_chunk);
+}
+
 pub fn draw_routes<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
 {
   let chunks = Layout::default()
@@ -215,44 +259,53 @@ pub fn draw_routes<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
 
   draw_user_block(f, app, chunks[0]);
 
+  // Split the right side into breadcrumb (top) and main content (bottom)
+  let right_chunks = Layout::default()
+    .direction(Direction::Vertical)
+    .constraints([Constraint::Length(3), Constraint::Min(1)].as_ref())
+    .split(chunks[1]);
+
+  // Draw breadcrumb box at the top of the right side
+  draw_breadcrumb_box(f, app, right_chunks[0]);
+
   let current_route = app.get_current_route();
 
   match current_route.id {
     RouteId::Search => {
-      draw_search_results::<CrosstermBackend<std::io::Stdout>>(f, app, chunks[1]);
+      draw_search_results::<CrosstermBackend<std::io::Stdout>>(f, app, right_chunks[1]);
     }
     RouteId::TrackTable => {
-      draw_song_table::<CrosstermBackend<std::io::Stdout>>(f, app, chunks[1]);
+      draw_song_table::<CrosstermBackend<std::io::Stdout>>(f, app, right_chunks[1]);
     }
     RouteId::AlbumTracks => {
-      draw_album_table::<CrosstermBackend<std::io::Stdout>>(f, app, chunks[1]);
+      draw_album_table::<CrosstermBackend<std::io::Stdout>>(f, app, right_chunks[1]);
     }
     RouteId::RecentlyPlayed => {
-      draw_recently_played_table::<CrosstermBackend<std::io::Stdout>>(f, app, chunks[1]);
+      draw_recently_played_table::<CrosstermBackend<std::io::Stdout>>(f, app, right_chunks[1]);
     }
     RouteId::Artist => {
-      draw_artist_albums::<CrosstermBackend<std::io::Stdout>>(f, app, chunks[1]);
+      draw_artist_albums::<CrosstermBackend<std::io::Stdout>>(f, app, right_chunks[1]);
     }
     RouteId::AlbumList => {
-      draw_album_list::<CrosstermBackend<std::io::Stdout>>(f, app, chunks[1]);
+      draw_album_list::<CrosstermBackend<std::io::Stdout>>(f, app, right_chunks[1]);
     }
     RouteId::PodcastEpisodes => {
-      draw_show_episodes::<CrosstermBackend<std::io::Stdout>>(f, app, chunks[1]);
+      draw_show_episodes::<CrosstermBackend<std::io::Stdout>>(f, app, right_chunks[1]);
     }
     RouteId::Home => {
-      draw_home::<CrosstermBackend<std::io::Stdout>>(f, app, chunks[1]);
+      draw_home::<CrosstermBackend<std::io::Stdout>>(f, app, right_chunks[1]);
     }
     RouteId::MadeForYou => {
-      draw_made_for_you::<CrosstermBackend<std::io::Stdout>>(f, app, chunks[1]);
+      draw_made_for_you::<CrosstermBackend<std::io::Stdout>>(f, app, right_chunks[1]);
     }
     RouteId::Artists => {
-      draw_artist_table::<CrosstermBackend<std::io::Stdout>>(f, app, chunks[1]);
+      draw_artist_table::<CrosstermBackend<std::io::Stdout>>(f, app, right_chunks[1]);
     }
     RouteId::Podcasts => {
-      draw_podcast_table::<CrosstermBackend<std::io::Stdout>>(f, app, chunks[1]);
+      draw_podcast_table::<CrosstermBackend<std::io::Stdout>>(f, app, right_chunks[1]);
     }
     RouteId::Recommendations => {
-      draw_recommendations_table::<CrosstermBackend<std::io::Stdout>>(f, app, chunks[1]);
+      draw_recommendations_table::<CrosstermBackend<std::io::Stdout>>(f, app, right_chunks[1]);
     }
     RouteId::SelectedDevice => {} // This is handled as a "full screen" route in main.rs
     RouteId::Analysis => {} // This is handled as a "full screen" route in main.rs
@@ -390,7 +443,7 @@ pub fn draw_search_results<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
       None => vec![],
     };
 
-    draw_selectable_list(
+    draw_search_result_list(
       f,
       app,
       song_artist_block[0],
@@ -416,7 +469,7 @@ pub fn draw_search_results<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
       None => vec![],
     };
 
-    draw_selectable_list(
+    draw_search_result_list(
       f,
       app,
       song_artist_block[1],
@@ -456,7 +509,7 @@ pub fn draw_search_results<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
       None => vec![],
     };
 
-    draw_selectable_list(
+    draw_search_result_list(
       f,
       app,
       albums_playlist_block[0],
@@ -474,7 +527,7 @@ pub fn draw_search_results<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
         .collect(),
       None => vec![],
     };
-    draw_selectable_list(
+    draw_search_result_list(
       f,
       app,
       albums_playlist_block[1],
@@ -506,7 +559,7 @@ pub fn draw_search_results<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
         .collect(),
       None => vec![],
     };
-    draw_selectable_list(
+    draw_search_result_list(
       f,
       app,
       podcasts_block[0],
@@ -553,7 +606,7 @@ pub fn draw_artist_table<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
     f,
     app,
     layout_chunk,
-    ("Artists", &header),
+    ("", &header),
     &items,
     app.artists_list_index,
     highlight_state,
@@ -602,7 +655,7 @@ pub fn draw_podcast_table<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
       f,
       app,
       layout_chunk,
-      ("Podcasts", &header),
+      ("", &header),
       &items,
       app.shows_list_index,
       highlight_state,
@@ -856,7 +909,7 @@ pub fn draw_song_table<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
     f,
     app,
     layout_chunk,
-    ("Songs", &header),
+    ("", &header),
     &items,
     app.track_table.selected_index,
     highlight_state,
@@ -1145,7 +1198,7 @@ fn draw_artist_albums<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
       f,
       app,
       chunks[0],
-      &format!("{} - Top Tracks", &artist.artist_name),
+      "Top Tracks",
       &top_tracks,
       get_artist_highlight_state(app, ArtistBlock::TopTracks),
       Some(artist.selected_top_track_index),
@@ -1335,7 +1388,7 @@ pub fn draw_album_list<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
       f,
       app,
       layout_chunk,
-      ("Saved Albums", &header),
+      ("", &header),
       &items,
       selected_song_index,
       highlight_state,
@@ -1483,7 +1536,7 @@ pub fn draw_made_for_you<B>(f: &mut Frame, app: &App, layout_chunk: Rect)
       f,
       app,
       layout_chunk,
-      ("Made For You", &header),
+      ("", &header),
       &items,
       app.made_for_you_index,
       highlight_state,
@@ -1548,7 +1601,7 @@ pub fn draw_recently_played_table<B>(f: &mut Frame, app: &App, layout_chunk: Rec
       f,
       app,
       layout_chunk,
-      ("Recently Played Tracks", &header),
+      ("", &header),
       &items,
       selected_song_index,
       highlight_state,
@@ -1575,14 +1628,47 @@ fn draw_selectable_list<S>(
     .map(|i| ListItem::new(Span::raw(i.as_ref())))
     .collect();
 
-  //TODO
+  let title_spans = create_focus_title(title, &app.user_config.theme, highlight_state);
   let list = List::new(lst_items)
     .block(
       Block::default()
-        .title(Span::styled(
-          title,
-          get_color(highlight_state, app.user_config.theme),
-        ))
+        .title(Line::from(title_spans))
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(get_color(highlight_state, app.user_config.theme))
+    )
+    .style(Style::default().fg(app.user_config.theme.text))
+    .highlight_style(
+      get_color(highlight_state, app.user_config.theme).add_modifier(Modifier::BOLD),
+    );
+  f.render_stateful_widget(list, layout_chunk, &mut state);
+}
+
+// Special version for search results without focus letters
+fn draw_search_result_list<S>(
+  f: &mut Frame,
+  app: &App,
+  layout_chunk: Rect,
+  title: &str,
+  items: &[S],
+  highlight_state: (bool, bool),
+  selected_index: Option<usize>,
+) where
+  S: std::convert::AsRef<str>,
+{
+  let mut state = ListState::default();
+  state.select(selected_index);
+
+  let lst_items: Vec<ListItem> = items
+    .iter()
+    .map(|i| ListItem::new(Span::raw(i.as_ref())))
+    .collect();
+
+  // Use plain title without focus letters for search results
+  let list = List::new(lst_items)
+    .block(
+      Block::default()
+        .title(title)
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(get_color(highlight_state, app.user_config.theme))
