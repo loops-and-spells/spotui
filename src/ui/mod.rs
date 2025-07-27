@@ -2839,7 +2839,12 @@ fn draw_coin_flip_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) -> (Co
           
           // Higher saturation for more vivid colors
           let saturation = 0.85 + 0.15 * (time_ms as f32 / 2000.0).sin() * animation_intensity;
-          let lightness = 0.55 + 0.15 * radial_factor;
+          // Darker inner ring - reduce lightness near the hole
+          let lightness = if radial_factor < 0.3 {
+            0.35 + 0.15 * radial_factor // Darker near hole
+          } else {
+            0.55 + 0.15 * radial_factor // Normal brightness
+          };
           
           let (r, g, b) = hsl_to_rgb(hue, saturation, lightness);
           let shimmer_color = Color::Rgb(r, g, b);
@@ -2863,15 +2868,10 @@ fn draw_coin_flip_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) -> (Co
           }
         };
         
-        // Add label area
+        // Add label area - lighten on both sides for consistency
         if distance_from_center < radius * 0.4 && distance_from_center > radius * 0.15 {
-          if show_cd_side {
-            // CD label area - slightly darker silver
-            color = Color::Rgb(195, 195, 205);
-          } else {
-            // Album art label area
-            color = lighten_color(color, 1.2);
-          }
+          // Lighten the label area on both album art and CD sides
+          color = lighten_color(color, 1.2);
         }
         
         // Add tracks/grooves effect for CD side
@@ -2932,10 +2932,10 @@ fn draw_coin_flip_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) -> (Co
             
             let shading = if flip_gradient {
               // Flipped: dark on left, light on right
-              0.5 + (normalized_x + 1.0) * 0.25  // 0.5 to 1.0
+              0.3 + (normalized_x + 1.0) * 0.35  // 0.3 to 1.0
             } else {
               // Normal: light on left, dark on right
-              1.0 - (normalized_x + 1.0) * 0.25  // 1.0 to 0.5
+              1.0 - (normalized_x + 1.0) * 0.35  // 1.0 to 0.3
             };
             
             let darkness = 1.0 - ((1.0 - shading) * gradient_strength);
@@ -2947,6 +2947,42 @@ fn draw_coin_flip_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) -> (Co
         // Commented out to make gradient more visible
         // let lighting = (rotation_angle.cos().abs() * 0.3 + 0.7).max(0.4);
         // color = darken_color(color, lighting);
+        
+        // Rainbow edge effect - applies to both sides
+        if distance_from_center > radius * 0.92 && distance_from_center <= radius {
+          let edge_intensity = (distance_from_center - radius * 0.92) / (radius * 0.08);
+          // Entire edge cycles through rainbow - no position dependency
+          let time_factor = (time_ms as f32 / 1000.0) % 1.0; // Cycle every second
+          let edge_hue = time_factor * 360.0;
+          // Add slight variation based on angle for shimmer
+          let angle_variation = (dy_from_center.atan2(disc_dx) * 2.0).sin() * 30.0;
+          let final_hue = (edge_hue + angle_variation) % 360.0;
+          let (r, g, b) = hsl_to_rgb(final_hue, 0.9, 0.7);
+          let edge_color = Color::Rgb(r, g, b);
+          color = blend_colors(color, edge_color, edge_intensity * 0.9);
+        }
+        
+        // Rainbow inner ring around the hole - back to original size but more transparent
+        if distance_from_center > radius * 0.15 && distance_from_center < radius * 0.25 {
+          let ring_intensity = 1.0 - ((distance_from_center - radius * 0.20) / (radius * 0.05)).abs();
+          
+          // Match the outer edge timing for consistency
+          let time_factor = (time_ms as f32 / 800.0) % 1.0; // Faster cycle for visibility
+          let ring_hue = time_factor * 360.0;
+          
+          // Simple clean rainbow without too much variation
+          let angle = dy_from_center.atan2(disc_dx);
+          let subtle_variation = (angle * 2.0).sin() * 15.0;
+          let final_hue = (ring_hue + subtle_variation) % 360.0;
+          
+          // More visible but still transparent on CD side
+          let blend_strength = if show_cd_side { 0.4 } else { 0.7 };
+          let lightness = if show_cd_side { 0.5 } else { 0.65 }; // Brighter on CD side
+          
+          let (r, g, b) = hsl_to_rgb(final_hue, 0.9, lightness);
+          let ring_color = Color::Rgb(r, g, b);
+          color = blend_colors(color, ring_color, ring_intensity * blend_strength);
+        }
         
         // Override with hole color AFTER all effects (should match background)
         if distance_from_center < radius * 0.15 {
