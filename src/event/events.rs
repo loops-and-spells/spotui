@@ -1,6 +1,14 @@
 use crate::event::Key;
 use crossterm::event;
-use std::{sync::{mpsc, Arc, atomic::{AtomicU64, Ordering}}, thread, time::Duration};
+use std::{
+    sync::{
+        mpsc::{self, TryRecvError},
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    thread,
+    time::{Duration, Instant},
+};
 
 #[derive(Debug, Clone, Copy)]
 /// Configuration for event handling.
@@ -26,6 +34,8 @@ pub enum Event<I> {
   Input(I),
   /// An tick event occurred.
   Tick,
+  /// Terminal was resized
+  Resize(u16, u16),
 }
 
 /// A small event handler that wrap crossterm input and tick event. Each event
@@ -33,7 +43,8 @@ pub enum Event<I> {
 pub struct Events {
   rx: mpsc::Receiver<Event<Key>>,
   // Need to be kept around to prevent disposing the sender side.
-  _tx: mpsc::Sender<Event<Key>>,
+  _input_tx: mpsc::Sender<Event<Key>>,
+  _tick_tx: mpsc::Sender<Event<Key>>,
   // Shared tick rate that can be updated dynamically
   tick_rate_ms: Arc<AtomicU64>,
 }
@@ -51,34 +62,91 @@ impl Events {
   pub fn with_config(config: EventConfig) -> Events {
     let (tx, rx) = mpsc::channel();
     let tick_rate_ms = Arc::new(AtomicU64::new(config.tick_rate.as_millis() as u64));
+    
+    // Clone for input thread
+    let input_tx = tx.clone();
+    let _input_tx_handle = input_tx.clone();
+    
+    // Clone for tick thread
+    let tick_tx = tx.clone();
+    let _tick_tx_handle = tick_tx.clone();
     let tick_rate_ms_clone = Arc::clone(&tick_rate_ms);
 
-    let event_tx = tx.clone();
+    // Spawn dedicated input thread - polls frequently for immediate response
     thread::spawn(move || {
+      loop {
+        // Poll with very short timeout (1ms) for instant input response
+        match event::poll(Duration::from_millis(1)) {
+          Ok(true) => {
+            match event::read() {
+              Ok(event::Event::Key(key)) => {
+                let key = Key::from(key);
+                if input_tx.send(Event::Input(key)).is_err() {
+                  break; // Channel closed, exit thread
+                }
+              }
+              Ok(event::Event::Resize(width, height)) => {
+                if input_tx.send(Event::Resize(width, height)).is_err() {
+                  break; // Channel closed, exit thread
+                }
+              }
+              Ok(_) => {} // Ignore other events like mouse
+              Err(_) => {
+                // Error reading event, continue to next iteration
+                // This prevents the thread from crashing on resize errors
+                continue;
+              }
+            }
+          }
+          Ok(false) => {} // No event available
+          Err(_) => {
+            // Error polling, sleep briefly and continue
+            thread::sleep(Duration::from_millis(10));
+          }
+        }
+      }
+    });
+
+    // Spawn dedicated tick thread - sends tick events at configured rate
+    thread::spawn(move || {
+      let mut last_tick = Instant::now();
+      
       loop {
         // Get current tick rate
         let current_tick_rate = Duration::from_millis(tick_rate_ms_clone.load(Ordering::Relaxed));
         
-        // poll for tick rate duration, if no event, sent tick event.
-        if event::poll(current_tick_rate).unwrap() {
-          if let event::Event::Key(key) = event::read().unwrap() {
-            let key = Key::from(key);
-
-            event_tx.send(Event::Input(key)).unwrap();
-          }
+        // Sleep until next tick
+        let elapsed = last_tick.elapsed();
+        if elapsed < current_tick_rate {
+          thread::sleep(current_tick_rate - elapsed);
         }
-
-        event_tx.send(Event::Tick).unwrap();
+        
+        // Send tick event
+        if tick_tx.send(Event::Tick).is_err() {
+          break; // Channel closed, exit thread
+        }
+        
+        last_tick = Instant::now();
       }
     });
 
-    Events { rx, _tx: tx, tick_rate_ms }
+    Events { 
+      rx, 
+      _input_tx: _input_tx_handle,
+      _tick_tx: _tick_tx_handle,
+      tick_rate_ms 
+    }
   }
 
   /// Attempts to read an event.
   /// This function will block the current thread.
   pub fn next(&self) -> Result<Event<Key>, mpsc::RecvError> {
     self.rx.recv()
+  }
+  
+  /// Try to read an event without blocking
+  pub fn try_next(&self) -> Result<Event<Key>, TryRecvError> {
+    self.rx.try_recv()
   }
   
   /// Update the tick rate dynamically

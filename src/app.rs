@@ -246,6 +246,12 @@ pub struct SelectedFullAlbum {
   pub selected_index: usize,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum IdleAnimation {
+  SpinningRecord,
+  CoinFlip,
+}
+
 #[derive(Clone)]
 pub struct Artist {
   pub artist_name: String,
@@ -304,6 +310,7 @@ pub struct App {
   pub selected_playlist_index: Option<usize>,
   pub active_playlist_index: Option<usize>,
   pub size: Rect,
+  pub last_resize_time: Instant,
   pub small_search_limit: u32,
   pub song_progress_ms: u128,
   pub seek_ms: Option<u128>,
@@ -332,6 +339,7 @@ pub struct App {
   pub current_album_art_url: Option<String>,
   pub last_user_interaction: Instant,
   pub is_idle_mode: bool,
+  pub idle_animation: IdleAnimation,
 }
 
 impl Default for App {
@@ -349,6 +357,7 @@ impl Default for App {
       saved_album_tracks_index: 0,
       recently_played: Default::default(),
       size: Rect::default(),
+      last_resize_time: Instant::now(),
       selected_album_simplified: None,
       selected_album_full: None,
       home_scroll: 0,
@@ -422,6 +431,7 @@ impl Default for App {
       current_album_art_url: None,
       last_user_interaction: Instant::now(),
       is_idle_mode: false,
+      idle_animation: IdleAnimation::SpinningRecord,
     }
   }
 }

@@ -2177,6 +2177,64 @@ fn darken_color(color: Color, factor: f32) -> Color {
   }
 }
 
+/// Lighten a color by increasing its brightness
+fn lighten_color(color: Color, factor: f32) -> Color {
+  match color {
+    Color::Rgb(r, g, b) => {
+      let lightened_r = (r as f32 * factor).max(0.0).min(255.0) as u8;
+      let lightened_g = (g as f32 * factor).max(0.0).min(255.0) as u8;
+      let lightened_b = (b as f32 * factor).max(0.0).min(255.0) as u8;
+      Color::Rgb(lightened_r, lightened_g, lightened_b)
+    }
+    _ => color,
+  }
+}
+
+/// Convert HSL to RGB color
+fn hsl_to_rgb(h: f32, s: f32, l: f32) -> (u8, u8, u8) {
+  let h = h / 360.0;
+  let r;
+  let g;
+  let b;
+
+  if s == 0.0 {
+    r = l;
+    g = l;
+    b = l;
+  } else {
+    let hue2rgb = |p: f32, q: f32, t: f32| -> f32 {
+      let mut t = t;
+      if t < 0.0 { t += 1.0; }
+      if t > 1.0 { t -= 1.0; }
+      if t < 1.0/6.0 { return p + (q - p) * 6.0 * t; }
+      if t < 1.0/2.0 { return q; }
+      if t < 2.0/3.0 { return p + (q - p) * (2.0/3.0 - t) * 6.0; }
+      p
+    };
+
+    let q = if l < 0.5 { l * (1.0 + s) } else { l + s - l * s };
+    let p = 2.0 * l - q;
+    r = hue2rgb(p, q, h + 1.0/3.0);
+    g = hue2rgb(p, q, h);
+    b = hue2rgb(p, q, h - 1.0/3.0);
+  }
+
+  ((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
+}
+
+/// Blend two colors together
+fn blend_colors(color1: Color, color2: Color, factor: f32) -> Color {
+  match (color1, color2) {
+    (Color::Rgb(r1, g1, b1), Color::Rgb(r2, g2, b2)) => {
+      let r = (r1 as f32 * (1.0 - factor) + r2 as f32 * factor) as u8;
+      let g = (g1 as f32 * (1.0 - factor) + g2 as f32 * factor) as u8;
+      let b = (b1 as f32 * (1.0 - factor) + b2 as f32 * factor) as u8;
+      Color::Rgb(r, g, b)
+    }
+    _ => color1,
+  }
+}
+
 /// Extract vibrant and dark colors from album art
 fn get_album_art_colors(art: &crate::album_art::PixelatedAlbumArt) -> (Color, Color) {
   let mut darkest_color = art.pixels[0][0].to_ratatui_color();
@@ -2431,7 +2489,10 @@ pub fn draw_idle_mode(f: &mut Frame, app: &App) {
 
   // Draw fullscreen album art and get dynamic colors
   let (vibrant_color, dark_color) = if app.current_album_art.is_some() {
-    draw_fullscreen_album_art(f, app, chunks[0])
+    match app.idle_animation {
+      crate::app::IdleAnimation::SpinningRecord => draw_fullscreen_album_art(f, app, chunks[0]),
+      crate::app::IdleAnimation::CoinFlip => draw_coin_flip_album_art(f, app, chunks[0]),
+    }
   } else {
     (Color::Cyan, Color::DarkGray)
   };
@@ -2479,7 +2540,7 @@ pub fn draw_idle_mode(f: &mut Frame, app: &App) {
         .block(Block::default().borders(Borders::NONE))
         .gauge_style(Style::default()
           .fg(vibrant_color)
-          .bg(dark_color))
+          .bg(lighten_color(dark_color, 1.3)))
         .ratio(progress_ratio)
         .label(Span::styled(
           track_info,
@@ -2496,8 +2557,8 @@ fn draw_fullscreen_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) -> (C
     // Get dynamic colors from the album art
     let (vibrant_color, darkest_color) = get_album_art_colors(art);
     
-    // Make the background one shade darker than the picked color for better visual separation
-    let darker_background = darken_color(darkest_color, 0.7); // 70% brightness
+    // Make the background darker than the picked color but not too dark
+    let darker_background = darken_color(darkest_color, 0.5); // 50% brightness - not too dark
     
     // Fill the entire background with the darker color
     let background = Block::default()
@@ -2512,7 +2573,9 @@ fn draw_fullscreen_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) -> (C
     let available_height = layout_chunk.height.saturating_sub(shadow_space);
     
     // Determine the size to use (maintain square aspect ratio)
-    let display_size = available_width.min(available_height) as u32;
+    // Cap at 100x100 to prevent performance issues on large terminals
+    const MAX_RENDER_SIZE: u32 = 100;
+    let display_size = available_width.min(available_height).min(MAX_RENDER_SIZE as u16) as u32;
     
     // Calculate actual pixel size based on the original art size
     let scale_factor = display_size as f32 / art.width as f32;
@@ -2542,61 +2605,26 @@ fn draw_fullscreen_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) -> (C
     let center_y = display_size as f32 / 2.0;
     let radius = display_size as f32 / 2.0;
     
-    // Draw circular drop shadow first (offset by 2 pixels right and down)
-    for y in 0..display_size {
-      let y_pos = layout_chunk.y + inset_y_offset + y as u16 + 2;
-      if y_pos >= layout_chunk.y + layout_chunk.height {
-        break;
-      }
-      
-      for x in 0..display_size {
-        let x_pos = layout_chunk.x + inset_x_offset + (x as u16 * 2) + 4;
-        if x_pos + 2 > layout_chunk.x + layout_chunk.width {
-          break;
-        }
-        
-        // Check if pixel is within circle
-        let dx = x as f32 - center_x;
-        let dy = y as f32 - center_y;
-        let distance = (dx * dx + dy * dy).sqrt();
-        
-        if distance <= radius {
-          let pixel = Span::styled("██", Style::default().fg(Color::Black));
-          let paragraph = Paragraph::new(pixel);
-          let pixel_area = Rect {
-            x: x_pos,
-            y: y_pos,
-            width: 2,
-            height: 1,
-          };
-          f.render_widget(paragraph, pixel_area);
-        }
-      }
-    }
+    // Pre-render the entire album art into a text buffer for better performance
+    let shadow_color = darken_color(darker_background, 0.7); // 70% of background brightness
     
-    // Draw the circular album art with rotation
+    // Build the album art in a single buffer
+    let mut lines: Vec<Vec<Span>> = Vec::with_capacity(display_size as usize);
+    
+    // First, pre-calculate rotations
+    let cos_angle = rotation_angle.cos();
+    let sin_angle = rotation_angle.sin();
+    
     for y in 0..display_size {
-      let y_pos = layout_chunk.y + inset_y_offset + y as u16;
-      if y_pos >= layout_chunk.y + layout_chunk.height {
-        break;
-      }
+      let mut line_spans = Vec::with_capacity(display_size as usize);
       
       for x in 0..display_size {
-        let x_pos = layout_chunk.x + inset_x_offset + (x as u16 * 2);
-        if x_pos + 2 > layout_chunk.x + layout_chunk.width {
-          break;
-        }
-        
         // Check if pixel is within circle
         let dx = x as f32 - center_x;
         let dy = y as f32 - center_y;
         let distance = (dx * dx + dy * dy).sqrt();
         
         if distance <= radius {
-          // Apply rotation transformation (inverse rotation to find source pixel)
-          let cos_angle = rotation_angle.cos();
-          let sin_angle = rotation_angle.sin();
-          
           // Apply inverse rotation to find which pixel from the source should be here
           let rotated_dx = cos_angle * dx - sin_angle * dy;
           let rotated_dy = sin_angle * dx + cos_angle * dy;
@@ -2606,64 +2634,348 @@ fn draw_fullscreen_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) -> (C
           let src_y = ((rotated_dy + center_y) / scale_factor) as i32;
           
           // Get the pixel color from the original art
-          if src_x >= 0 && src_y >= 0 && (src_y as usize) < art.pixels.len() && (src_x as usize) < art.pixels[src_y as usize].len() {
-            let mut color = art.pixels[src_y as usize][src_x as usize].to_ratatui_color();
-            
-            // Add center hole
-            if distance < radius * 0.15 {
-              color = darkest_color;
-            }
-            
-            // Add label area (lighter circle in center)
-            if distance < radius * 0.4 && distance > radius * 0.15 {
-              color = match (color, vibrant_color) {
-                (Color::Rgb(r, g, b), Color::Rgb(vr, vg, vb)) => Color::Rgb(
-                  ((r as f32 * 0.7 + vr as f32 * 0.3)) as u8,
-                  ((g as f32 * 0.7 + vg as f32 * 0.3)) as u8,
-                  ((b as f32 * 0.7 + vb as f32 * 0.3)) as u8,
-                ),
-                _ => color,
-              };
-            }
-            
-            // Add a visual mark to show rotation (a line from center to edge)
-            let angle_to_point = dy.atan2(dx);
-            // Create a thick line by checking angle difference
-            let angle_diff = ((angle_to_point - rotation_angle + std::f32::consts::PI) % (2.0 * std::f32::consts::PI)) - std::f32::consts::PI;
-            if angle_diff.abs() < 0.1 && distance > radius * 0.4 {
-              color = Color::Red; // Red mark for visibility
-            }
-            
-            // Render the pixel
-            let pixel = Span::styled("██", Style::default().fg(color));
-            let paragraph = Paragraph::new(pixel);
-            let pixel_area = Rect {
-              x: x_pos,
-              y: y_pos,
-              width: 2,
-              height: 1,
-            };
-            f.render_widget(paragraph, pixel_area);
+          let mut color = if src_x >= 0 && src_y >= 0 && (src_y as usize) < art.pixels.len() && (src_x as usize) < art.pixels[src_y as usize].len() {
+            art.pixels[src_y as usize][src_x as usize].to_ratatui_color()
           } else {
-            // Fill with darker background color if outside source image
-            let pixel = Span::styled("██", Style::default().fg(darker_background));
-            let paragraph = Paragraph::new(pixel);
-            let pixel_area = Rect {
-              x: x_pos,
-              y: y_pos,
-              width: 2,
-              height: 1,
-            };
-            f.render_widget(paragraph, pixel_area);
+            darker_background
+          };
+          
+          // Add center hole
+          if distance < radius * 0.15 {
+            color = darkest_color;
           }
+          
+          // Add label area (lighter circle in center)
+          if distance < radius * 0.4 && distance > radius * 0.15 {
+            color = match (color, vibrant_color) {
+              (Color::Rgb(r, g, b), Color::Rgb(vr, vg, vb)) => Color::Rgb(
+                ((r as f32 * 0.7 + vr as f32 * 0.3)) as u8,
+                ((g as f32 * 0.7 + vg as f32 * 0.3)) as u8,
+                ((b as f32 * 0.7 + vb as f32 * 0.3)) as u8,
+              ),
+              _ => color,
+            };
+          }
+          
+          // Add a visual mark to show rotation (a line from center to edge)
+          let angle_to_point = dy.atan2(dx);
+          // Create a thick line by checking angle difference
+          let angle_diff = ((angle_to_point - rotation_angle + std::f32::consts::PI) % (2.0 * std::f32::consts::PI)) - std::f32::consts::PI;
+          if angle_diff.abs() < 0.1 && distance > radius * 0.4 {
+            color = Color::Red; // Red mark for visibility
+          }
+          
+          line_spans.push(Span::styled("██", Style::default().fg(color)));
+        } else {
+          // Outside the circle - transparent
+          line_spans.push(Span::raw("  "));
         }
       }
+      
+      lines.push(line_spans);
     }
     
-    // Removed blur effect - album art now has clean edges
+    // Draw shadow first as a single widget
+    let mut shadow_lines = Vec::new();
+    for y in 0..display_size {
+      let mut shadow_line = String::new();
+      for x in 0..display_size {
+        let dx = x as f32 - center_x;
+        let dy = y as f32 - center_y;
+        let distance = (dx * dx + dy * dy).sqrt();
+        
+        if distance <= radius {
+          shadow_line.push_str("██");
+        } else {
+          shadow_line.push_str("  ");
+        }
+      }
+      shadow_lines.push(Line::from(Span::styled(shadow_line, Style::default().fg(shadow_color))));
+    }
+    
+    // Render shadow
+    let shadow_paragraph = Paragraph::new(shadow_lines);
+    let shadow_area = Rect {
+      x: layout_chunk.x + inset_x_offset + 2,
+      y: layout_chunk.y + inset_y_offset + 2,
+      width: display_size as u16 * 2,
+      height: display_size as u16,
+    };
+    f.render_widget(shadow_paragraph, shadow_area);
+    
+    // Convert lines to text for the album art
+    let album_text: Vec<Line> = lines.into_iter()
+      .map(|spans| Line::from(spans))
+      .collect();
+    
+    // Render the entire album art as a single widget
+    let album_paragraph = Paragraph::new(album_text);
+    let album_area = Rect {
+      x: layout_chunk.x + inset_x_offset,
+      y: layout_chunk.y + inset_y_offset,
+      width: display_size as u16 * 2,
+      height: display_size as u16,
+    };
+    f.render_widget(album_paragraph, album_area);
     
     // Return the colors for progress bar theming
-    (vibrant_color, darkest_color)
+    (vibrant_color, darker_background)
+  } else {
+    // Default colors if no album art
+    (Color::Cyan, Color::DarkGray)
+  }
+}
+
+/// Draw coin-flip rotation album art that rotates on Y-axis
+fn draw_coin_flip_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) -> (Color, Color) {
+  if let Some(art) = &app.current_album_art {
+    // Get dynamic colors from the album art
+    let (vibrant_color, darkest_color) = get_album_art_colors(art);
+    
+    // Make the background darker than the picked color but not too dark
+    let darker_background = darken_color(darkest_color, 0.5); // 50% brightness - not too dark
+    
+    // Fill the entire background with the darker color
+    let background = Block::default()
+      .style(Style::default().bg(darker_background));
+    f.render_widget(background, layout_chunk);
+    
+    // Calculate the maximum size we can display
+    // Account for double-width characters (2:1 aspect ratio)
+    // No shadow space needed for coin flip
+    let available_width = layout_chunk.width / 2;  // Divide by 2 for double-width chars
+    let available_height = layout_chunk.height;
+    
+    // Determine the size to use (maintain square aspect ratio)
+    // Cap at 100x100 to prevent performance issues on large terminals
+    const MAX_RENDER_SIZE: u32 = 100;
+    let display_size = available_width.min(available_height).min(MAX_RENDER_SIZE as u16) as u32;
+    
+    // Calculate actual pixel size based on the original art size
+    let scale_factor = display_size as f32 / art.width as f32;
+    
+    // Center the art in the available space (no shadow offset)
+    let total_width = display_size as u16 * 2; // No shadow offset
+    let total_height = display_size as u16; // No shadow offset
+    let x_offset = (layout_chunk.width.saturating_sub(total_width)) / 2;
+    let y_offset = (layout_chunk.height.saturating_sub(total_height)) / 2;
+    
+    // The art itself doesn't need additional offset
+    let inset_x_offset = x_offset;
+    let inset_y_offset = y_offset;
+    
+    // Get rotation angle based on real-time for smooth animation
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    let time_ms = now.as_millis();
+    
+    // Coin flip rotation - 1 rotation per 4 seconds (15 RPM) for a more dramatic effect
+    let rotation_phase = (time_ms % 4000) as f32 / 4000.0;
+    let rotation_angle = rotation_phase * 2.0 * std::f32::consts::PI;
+    
+    // Calculate center point
+    let center_x = display_size as f32 / 2.0;
+    let center_y = display_size as f32 / 2.0;
+    let radius = display_size as f32 / 2.0;
+    
+    // Pre-render the entire coin flip animation into a text buffer for better performance
+    let mut lines: Vec<Vec<Span>> = Vec::with_capacity(display_size as usize);
+    
+    // Pre-calculate compression factor
+    let compression_factor = rotation_angle.cos();
+    // Show CD side when compression is negative (back half of rotation)
+    let show_cd_side = compression_factor < 0.0;
+    
+    for y in 0..display_size {
+      let mut line_spans = Vec::with_capacity(display_size as usize);
+      
+      for x in 0..display_size {
+        // Calculate position relative to center for the compressed view
+        let dx_from_center = x as f32 - center_x;
+        let dy_from_center = y as f32 - center_y;
+        
+        // For coin flip, we need to reverse-map from screen position to disc position
+        // Screen X maps to disc X through compression
+        let disc_dx = dx_from_center / compression_factor.abs().max(0.01);
+        let distance_from_center = (disc_dx * disc_dx + dy_from_center * dy_from_center).sqrt();
+        
+        // Check if this screen position maps to a point on the disc
+        if distance_from_center > radius || compression_factor.abs() < 0.01 {
+          // Outside the disc or edge-on
+          line_spans.push(Span::raw("  "));
+          continue;
+        }
+        
+        // We're within the circle, so proceed with rendering
+        let mut color = if show_cd_side {
+          // Show CD back side
+          let normalized_y = dy_from_center / radius;
+          let normalized_x = disc_dx / radius;
+          let angle_from_center = normalized_y.atan2(normalized_x);
+          
+          // CD base color (silver/gray)
+          let base_color = Color::Rgb(205, 205, 215);
+          
+          // Add rainbow shimmer effect based on angle and distance
+          let radial_factor = distance_from_center / radius;
+          let angular_factor = angle_from_center / (2.0 * std::f32::consts::PI);
+          
+          // Create a rainbow that shifts with rotation angle
+          let animation_intensity = (1.0_f32 + compression_factor).abs(); // 0 when flush, 1 when edge-on
+          
+          // Less angular influence when facing forward to reduce spiral effect
+          let rotation_offset = rotation_angle / (2.0 * std::f32::consts::PI);
+          let angular_influence = angular_factor * 0.5;
+          let radial_influence = radial_factor * 4.0;
+          
+          // Base hue primarily from radial distance with subtle angular variation
+          let base_hue = (radial_influence + angular_influence) * 360.0;
+          
+          // Add animation only when not flush - scale by animation_intensity
+          let animated_offset = rotation_offset * 3.0 * animation_intensity;
+          let shimmer_wave = (time_ms as f32 / 1500.0 + radial_factor * 2.0).sin() * 20.0 * animation_intensity;
+          
+          let hue = (base_hue + animated_offset * 360.0 + shimmer_wave) % 360.0;
+          
+          // Higher saturation for more vivid colors
+          let saturation = 0.85 + 0.15 * (time_ms as f32 / 2000.0).sin() * animation_intensity;
+          let lightness = 0.55 + 0.15 * radial_factor;
+          
+          let (r, g, b) = hsl_to_rgb(hue, saturation, lightness);
+          let shimmer_color = Color::Rgb(r, g, b);
+          
+          // Mix base color with shimmer, stronger effect on outer edge
+          let shimmer_intensity = (radial_factor * 0.7).min(1.0);
+          blend_colors(base_color, shimmer_color, shimmer_intensity)
+        } else {
+          // Show album art side
+          // We need to map from compressed screen coordinates back to original album art
+          // The disc_dx already represents the uncompressed X position
+          let uncompressed_x = (disc_dx + center_x) / scale_factor;
+          let src_x = uncompressed_x as i32;
+          let src_y = (y as f32 / scale_factor) as i32;
+          
+          // Get the pixel color from the original art
+          if src_x >= 0 && src_y >= 0 && (src_y as usize) < art.pixels.len() && (src_x as usize) < art.pixels[src_y as usize].len() {
+            art.pixels[src_y as usize][src_x as usize].to_ratatui_color()
+          } else {
+            darker_background
+          }
+        };
+        
+        // Add label area
+        if distance_from_center < radius * 0.4 && distance_from_center > radius * 0.15 {
+          if show_cd_side {
+            // CD label area - slightly darker silver
+            color = Color::Rgb(195, 195, 205);
+          } else {
+            // Album art label area
+            color = lighten_color(color, 1.2);
+          }
+        }
+        
+        // Add tracks/grooves effect for CD side
+        if show_cd_side && distance_from_center > radius * 0.4 {
+          let track_pattern = ((distance_from_center - radius * 0.4) * 50.0).sin();
+          if track_pattern > 0.7 {
+            color = darken_color(color, 0.95);
+          }
+        }
+        
+        // Add subtle edge darkening for depth
+        let edge_factor = 1.0 - (distance_from_center / radius).powf(3.0);
+        color = darken_color(color, 0.9 + 0.1 * edge_factor);
+        
+        // Apply fresnel effect - surfaces are more reflective at glancing angles
+        let fresnel_factor = 1.0 - compression_factor.abs(); // Inverted: 0 when flat, 1 when edge-on
+        
+        // Don't apply fresnel to the center hole area
+        let apply_fresnel = distance_from_center > radius * 0.15;
+        
+        if apply_fresnel {
+          // Apply fresnel effect differently for CD and album art sides
+          if show_cd_side {
+            // CD side: Increase brightness as it rotates edge-on
+            let fresnel_brightness = 1.0 + (fresnel_factor * 0.4);
+            color = lighten_color(color, fresnel_brightness);
+            
+            // Add extra shimmer when nearly edge-on
+            if fresnel_factor > 0.8 {
+              let edge_shimmer = ((time_ms as f32 / 500.0 + distance_from_center * 0.1).sin() + 1.0) * 0.1;
+              color = lighten_color(color, 1.0 + edge_shimmer);
+            }
+          } else {
+            // Album art side: Subtle brightening when edge-on, like a glossy surface
+            let fresnel_brightness = 1.0 + (fresnel_factor * 0.2);
+            color = lighten_color(color, fresnel_brightness);
+          }
+        }
+        
+        // Apply gradient that flips at edge-on position for continuous rotation
+        if distance_from_center <= radius && compression_factor.abs() < 0.95 {
+          // Gradient strength fades as we approach edge-on or flush
+          let gradient_strength = 1.0 - compression_factor.abs().powf(2.0);
+          
+          if gradient_strength > 0.05 {
+            let normalized_x = disc_dx / radius; // -1 to 1
+            
+            // Determine gradient direction based on rotation phase
+            // Flip gradient at both edge-on AND flush positions
+            // rotation_angle goes 0 → π → 2π
+            // 0: flush (flip)
+            // π/2: edge-on (flip)
+            // π: flush (flip)
+            // 3π/2: edge-on (flip)
+            // This creates 4 quadrants with alternating gradients
+            let quadrant = (rotation_angle / (std::f32::consts::PI * 0.5)) as i32;
+            let flip_gradient = quadrant % 2 == 1;
+            
+            let shading = if flip_gradient {
+              // Flipped: dark on left, light on right
+              0.5 + (normalized_x + 1.0) * 0.25  // 0.5 to 1.0
+            } else {
+              // Normal: light on left, dark on right
+              1.0 - (normalized_x + 1.0) * 0.25  // 1.0 to 0.5
+            };
+            
+            let darkness = 1.0 - ((1.0 - shading) * gradient_strength);
+            color = darken_color(color, darkness);
+          }
+        }
+        
+        // Apply lighting based on rotation angle for 3D effect
+        // Commented out to make gradient more visible
+        // let lighting = (rotation_angle.cos().abs() * 0.3 + 0.7).max(0.4);
+        // color = darken_color(color, lighting);
+        
+        // Override with hole color AFTER all effects (should match background)
+        if distance_from_center < radius * 0.15 {
+          color = darker_background;
+        }
+        
+        line_spans.push(Span::styled("██", Style::default().fg(color)));
+      }
+      
+      lines.push(line_spans);
+    }
+    
+    // Convert lines to text for the album art
+    let album_text: Vec<Line> = lines.into_iter()
+      .map(|spans| Line::from(spans))
+      .collect();
+    
+    // Render the entire coin flip as a single widget
+    let coin_paragraph = Paragraph::new(album_text);
+    let coin_area = Rect {
+      x: layout_chunk.x + inset_x_offset,
+      y: layout_chunk.y + inset_y_offset,
+      width: display_size as u16 * 2,
+      height: display_size as u16,
+    };
+    f.render_widget(coin_paragraph, coin_area);
+    
+    // Return the colors for progress bar theming
+    (vibrant_color, darker_background)
   } else {
     // Default colors if no album art
     (Color::Cyan, Color::DarkGray)

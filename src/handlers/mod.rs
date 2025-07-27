@@ -84,6 +84,24 @@ pub fn handle_app(key: Key, app: &mut App) {
         app.add_log_message("Exited fullscreen album art mode".to_string());
       }
     }
+    Key::Char('v') | Key::Char('V') => {
+      // Change visual mode in idle mode
+      if app.is_idle_mode {
+        use crate::app::IdleAnimation;
+        // Update the last interaction time to prevent auto-exit from idle mode
+        app.last_user_interaction = Instant::now();
+        app.idle_animation = match app.idle_animation {
+          IdleAnimation::SpinningRecord => {
+            app.add_log_message("Switched to coin-flip animation".to_string());
+            IdleAnimation::CoinFlip
+          }
+          IdleAnimation::CoinFlip => {
+            app.add_log_message("Switched to spinning record animation".to_string());
+            IdleAnimation::SpinningRecord
+          }
+        };
+      }
+    }
     _ if key == app.user_config.keys.jump_to_album => {
       handle_jump_to_album(app);
     }

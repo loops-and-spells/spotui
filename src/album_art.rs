@@ -3,9 +3,11 @@ use image::{DynamicImage, GenericImageView, Rgba, RgbaImage};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use ratatui::style::Color;
+use std::time::{SystemTime, UNIX_EPOCH};
+use serde::{Serialize, Deserialize};
 
 /// Represents ANSI color codes for terminal display
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AnsiColor {
     pub r: u8,
     pub g: u8,
@@ -20,7 +22,7 @@ impl AnsiColor {
 }
 
 /// A pixelated representation of album art using ANSI colors
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PixelatedAlbumArt {
     pub width: u32,
     pub height: u32,
@@ -38,11 +40,23 @@ impl PixelatedAlbumArt {
     }
 }
 
+/// Cached art entry with metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CachedArt {
+    art: PixelatedAlbumArt,
+    timestamp: u64,
+    size: u32,
+}
+
 /// Manager for album art caching and processing
 pub struct AlbumArtManager {
     cache_dir: PathBuf,
-    // Cache of album URL to processed art
-    cache: HashMap<String, PixelatedAlbumArt>,
+    // In-memory cache of album URL to processed art
+    memory_cache: HashMap<String, CachedArt>,
+    // Maximum number of items in memory cache
+    max_memory_items: usize,
+    // Maximum age for disk cache in seconds (7 days)
+    max_cache_age: u64,
 }
 
 impl AlbumArtManager {
@@ -56,15 +70,30 @@ impl AlbumArtManager {
         
         Ok(Self {
             cache_dir,
-            cache: HashMap::new(),
+            memory_cache: HashMap::new(),
+            max_memory_items: 50,
+            max_cache_age: 7 * 24 * 60 * 60, // 7 days
         })
     }
 
     /// Download and process album art from URL
     pub async fn get_album_art(&mut self, url: &str, target_size: u32) -> Result<PixelatedAlbumArt> {
-        // Check cache first
-        if let Some(cached) = self.cache.get(url) {
-            return Ok(cached.clone());
+        let cache_key = format!("{}-{}", url, target_size);
+        
+        // Check memory cache first
+        if let Some(cached) = self.memory_cache.get(&cache_key) {
+            if cached.size == target_size {
+                return Ok(cached.art.clone());
+            }
+        }
+        
+        // Check disk cache
+        if let Ok(cached) = self.load_from_disk_cache(&cache_key) {
+            if cached.size == target_size && self.is_cache_valid(cached.timestamp) {
+                // Add to memory cache
+                self.add_to_memory_cache(cache_key.clone(), cached.clone());
+                return Ok(cached.art);
+            }
         }
 
         // Download image
@@ -73,16 +102,29 @@ impl AlbumArtManager {
         // Process into pixelated art
         let pixelated = self.pixelate_image(image_data, target_size)?;
         
-        // Cache the result
-        self.cache.insert(url.to_string(), pixelated.clone());
+        // Create cached entry
+        let cached = CachedArt {
+            art: pixelated.clone(),
+            timestamp: SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs(),
+            size: target_size,
+        };
+        
+        // Save to disk cache
+        let _ = self.save_to_disk_cache(&cache_key, &cached);
+        
+        // Add to memory cache
+        self.add_to_memory_cache(cache_key, cached);
         
         Ok(pixelated)
     }
 
-    /// Download image from URL
+    /// Download image from URL with timeout
     async fn download_image(&self, url: &str) -> Result<DynamicImage> {
-        // Create a new reqwest client
-        let client = reqwest::Client::new();
+        // Create a new reqwest client with timeout
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()?;
+        
         let response = client.get(url).send().await?;
         let bytes = response.bytes().await?;
         let image = image::load_from_memory(&bytes)?;
@@ -108,6 +150,57 @@ impl AlbumArtManager {
         }
         
         Ok(art)
+    }
+
+    /// Add to memory cache with LRU eviction
+    fn add_to_memory_cache(&mut self, key: String, cached: CachedArt) {
+        // Evict oldest entries if cache is full
+        if self.memory_cache.len() >= self.max_memory_items {
+            // Find oldest entry
+            if let Some(oldest_key) = self.memory_cache
+                .iter()
+                .min_by_key(|(_, v)| v.timestamp)
+                .map(|(k, _)| k.clone())
+            {
+                self.memory_cache.remove(&oldest_key);
+            }
+        }
+        
+        self.memory_cache.insert(key, cached);
+    }
+    
+    /// Check if cache timestamp is still valid
+    fn is_cache_valid(&self, timestamp: u64) -> bool {
+        if let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) {
+            now.as_secs() - timestamp < self.max_cache_age
+        } else {
+            false
+        }
+    }
+    
+    /// Get cache file path for a key
+    fn get_cache_path(&self, key: &str) -> PathBuf {
+        // Create a safe filename from the key
+        let safe_key = key.chars()
+            .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '_' })
+            .collect::<String>();
+        self.cache_dir.join(format!("{}.json", safe_key))
+    }
+    
+    /// Load from disk cache
+    fn load_from_disk_cache(&self, key: &str) -> Result<CachedArt> {
+        let path = self.get_cache_path(key);
+        let data = std::fs::read_to_string(path)?;
+        let cached: CachedArt = serde_json::from_str(&data)?;
+        Ok(cached)
+    }
+    
+    /// Save to disk cache
+    fn save_to_disk_cache(&self, key: &str, cached: &CachedArt) -> Result<()> {
+        let path = self.get_cache_path(key);
+        let data = serde_json::to_string(cached)?;
+        std::fs::write(path, data)?;
+        Ok(())
     }
 
     /// Get a placeholder art for when no album art is available

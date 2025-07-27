@@ -990,6 +990,14 @@ impl Network {
     match self.spotify.transfer_playback(&device_id, Some(true)).await {
           Ok(_) => {
             self.log_error("SUCCESS: Playback transferred to device");
+            
+            // Save the device ID to config for future sessions
+            if let Err(e) = self.client_config.set_device_id(device_id.clone()) {
+              self.log_error(&format!("Failed to save device ID to config: {}", e));
+            } else {
+              self.log_error("Device ID saved to config");
+            }
+            
             let mut app = self.app.lock().await;
             app.add_log_message(format!("Playback transferred to device"));
             
@@ -1024,19 +1032,44 @@ impl Network {
   async fn get_devices(&mut self) {
     match self.spotify.device().await {
       Ok(devices) => {
-        let mut app = self.app.lock().await;
-        app.add_log_message(format!("Found {} devices", devices.len()));
+        let saved_device_id = self.client_config.device_id.clone();
+        let mut selected_index = 0;
+        let mut found_saved_device = false;
+        
         // Create DevicePayload structure
         let device_payload = rspotify::model::device::DevicePayload { devices };
+        
+        // Check if we have a saved device and find its index
+        if let Some(saved_id) = &saved_device_id {
+          for (index, device) in device_payload.devices.iter().enumerate() {
+            if device.id.as_ref().map(|id| id == saved_id).unwrap_or(false) {
+              selected_index = index;
+              found_saved_device = true;
+              break;
+            }
+          }
+        }
+        
+        let mut app = self.app.lock().await;
+        app.add_log_message(format!("Found {} devices", device_payload.devices.len()));
         app.devices = Some(device_payload);
         
         // Only set selected index if there are devices
         if !app.devices.as_ref().unwrap().devices.is_empty() {
-          app.selected_device_index = Some(0); // Select first device by default
+          app.selected_device_index = Some(selected_index);
+          
+          // If we found the saved device, activate it
+          if found_saved_device {
+            if let Some(saved_id) = saved_device_id {
+              app.add_log_message(format!("Found saved device, activating: {}", saved_id));
+              // Drop the lock before calling transfer_playback
+              drop(app);
+              self.transfer_playback_to_device(saved_id).await;
+            }
+          } else {
+            app.add_log_message("No saved device found or device not available".to_string());
+          }
         }
-        
-        // No need to navigate - we're already on the device screen
-        app.add_log_message("Devices loaded successfully".to_string());
       }
       Err(e) => {
         let mut app = self.app.lock().await;

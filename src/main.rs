@@ -32,7 +32,7 @@ use crossterm::{
 use network::{IoEvent, Network};
 // use redirect_uri::redirect_uri_web_server;  // TODO: Fix redirect_uri module
 use rspotify::{
-  AuthCodeSpotify, Credentials, OAuth, Token,
+  AuthCodeSpotify, Credentials, OAuth,
   prelude::*,
 };
 use webbrowser;
@@ -42,7 +42,7 @@ use std::{
   panic::{self, PanicInfo},
   path::PathBuf,
   sync::Arc,
-  time::SystemTime,
+  time::{Duration, Instant, SystemTime},
 };
 use tokio::sync::Mutex;
 use ratatui::{
@@ -194,6 +194,62 @@ fn extract_code_from_url(url: &str) -> Result<String> {
   } else {
     Err(anyhow!("No authorization code found in redirect URL: {}", url))
   }
+}
+
+fn determine_optimal_tick_rate(app: &App, user_config: &UserConfig) -> u64 {
+  // Priority order for determining tick rate:
+  
+  // 1. Idle mode with animation - adjust based on terminal size
+  if app.is_idle_mode {
+    // Calculate approximate pixel count for the animation
+    let terminal_pixels = (app.size.width as u32 * app.size.height as u32) / 4;
+    
+    // Adjust frame rate based on terminal size to prevent performance issues
+    if terminal_pixels > 10000 {
+      return 100; // 10 FPS for very large terminals
+    } else if terminal_pixels > 5000 {
+      return 50; // 20 FPS for large terminals  
+    } else if terminal_pixels > 2500 {
+      return 33; // 30 FPS for medium terminals
+    } else {
+      return 16; // 60 FPS for small terminals
+    }
+  }
+  
+  // 2. Active user input in last 2 seconds - high priority
+  if app.last_user_interaction.elapsed().as_secs() < 2 {
+    return 50; // 20 FPS for responsive UI during interaction
+  }
+  
+  // 3. Music playing with visualizations - medium priority
+  if matches!(&app.current_playback_context, Some(ctx) if ctx.is_playing) {
+    // Check if we're on a view that shows progress or animations
+    match app.get_current_route().id {
+      RouteId::TrackTable | RouteId::AlbumTracks => {
+        return 100; // 10 FPS for progress bar updates
+      }
+      _ => {}
+    }
+  }
+  
+  // 4. Loading or fetching data - medium priority
+  // Check if we're in a loading state based on the active view
+  match app.get_current_route().active_block {
+    ActiveBlock::SearchResultBlock => {
+      if app.search_results.tracks.is_none() && 
+         app.search_results.artists.is_none() && 
+         app.search_results.albums.is_none() {
+        return 100; // 10 FPS while searching
+      }
+    }
+    ActiveBlock::Artists | ActiveBlock::AlbumList => {
+      return 100; // 10 FPS while loading artist/album data
+    }
+    _ => {}
+  }
+  
+  // 5. Default idle state - low priority
+  user_config.behavior.tick_rate_milliseconds
 }
 
 fn close_application() -> Result<()> {
@@ -413,35 +469,45 @@ async fn start_ui(user_config: UserConfig, app: &Arc<Mutex<App>>) -> Result<()> 
 
   loop {
     let mut app = app.lock().await;
-    // Get the size of the screen on each loop to account for resize event
-    if let Ok(size) = terminal.backend().size() {
-      let size_rect = Rect::new(0, 0, size.width, size.height);
-      // Reset the help menu is the terminal was resized
-      if is_first_render || app.size != size_rect {
-
-        app.size = size_rect;
+    // Handle initial size setup
+    if is_first_render {
+      // Get initial size on first render
+      if let Ok(size) = terminal.backend().size() {
+        app.size = Rect::new(0, 0, size.width, size.height);
+      }
+    }
+    
+    // Check if size changed
+    static mut LAST_PROCESSED_SIZE: (u16, u16) = (0, 0);
+    let current_size = (app.size.width, app.size.height);
+    
+    unsafe {
+      if is_first_render || LAST_PROCESSED_SIZE != current_size {
+        LAST_PROCESSED_SIZE = current_size;
 
         // Based on the size of the terminal, adjust the search limit.
         let potential_limit = max((app.size.height as i32) - 13, 0) as u32;
         let max_limit = min(potential_limit, 50);
-        let large_search_limit = min((f32::from(size.height) / 1.4) as u32, max_limit);
-        let small_search_limit = min((f32::from(size.height) / 2.85) as u32, max_limit / 2);
+        let large_search_limit = min((f32::from(app.size.height) / 1.4) as u32, max_limit);
+        let small_search_limit = min((f32::from(app.size.height) / 2.85) as u32, max_limit / 2);
 
         app.dispatch(IoEvent::UpdateSearchLimits(
           large_search_limit,
           small_search_limit,
         ));
-
       }
-    };
+    }
 
-    let current_route = app.get_current_route();
-    terminal.draw(|mut f| {
+    let current_route = app.get_current_route().clone();
+    let current_active_block = current_route.active_block.clone();
+    
+    // Wrap terminal draw in error handling to prevent freezing
+    if let Err(e) = terminal.draw(|mut f| {
       // Check for idle mode first
       if app.is_idle_mode {
         ui::draw_idle_mode(&mut f, &app);
       } else {
-        match current_route.active_block {
+        match current_active_block {
           ActiveBlock::SelectDevice => {
             ui::draw_device_list(&mut f, &app);
           }
@@ -459,9 +525,12 @@ async fn start_ui(user_config: UserConfig, app: &Arc<Mutex<App>>) -> Result<()> 
           }
         }
       }
-    })?;
+    }) {
+      // Log the error but continue running
+      app.add_log_message(format!("Terminal draw error: {}", e));
+    }
 
-    if current_route.active_block == ActiveBlock::Input {
+    if current_active_block == ActiveBlock::Input {
       terminal.show_cursor()?;
     } else {
       terminal.hide_cursor()?;
@@ -486,22 +555,23 @@ async fn start_ui(user_config: UserConfig, app: &Arc<Mutex<App>>) -> Result<()> 
       app.dispatch(IoEvent::RefreshAuthentication);
     }
 
-    // Adjust tick rate based on current state
-    // Use faster refresh rate (60 FPS) when in idle mode or when music is playing
-    // to ensure smooth animation of the spinning record
-    let should_use_fast_tick = app.is_idle_mode || 
-      matches!(&app.current_playback_context, Some(ctx) if ctx.is_playing);
-    
-    if should_use_fast_tick {
-      events.set_tick_rate(16); // ~60 FPS for smooth animation
-    } else {
-      events.set_tick_rate(user_config.behavior.tick_rate_milliseconds);
-    }
+    // Intelligent tick rate adjustment based on current state
+    let tick_rate = determine_optimal_tick_rate(&app, &user_config);
+    events.set_tick_rate(tick_rate);
 
     match events.next()? {
       event::Event::Input(key) => {
-        // Reset idle timer on any user input
-        app.reset_idle_timer();
+        // Check if this key should preserve idle mode
+        let preserve_idle_mode = app.is_idle_mode && matches!(key, Key::Char('v') | Key::Char('V'));
+        
+        // Reset idle timer on any user input (but don't exit idle mode for 'v')
+        if preserve_idle_mode {
+          // Just reset the timer without exiting idle mode
+          app.last_user_interaction = Instant::now();
+        } else {
+          // Normal reset which exits idle mode
+          app.reset_idle_timer();
+        }
         
         if key == Key::Ctrl('c') {
           break;
@@ -527,6 +597,14 @@ async fn start_ui(user_config: UserConfig, app: &Arc<Mutex<App>>) -> Result<()> 
         } else {
           handlers::handle_app(key, &mut app);
         }
+      }
+      event::Event::Resize(width, height) => {
+        // Update size immediately to prevent blocking
+        app.size = Rect::new(0, 0, width, height);
+        app.last_resize_time = Instant::now();
+        
+        // Don't do any complex operations here that could block
+        // The size change will be handled in the next render loop iteration
       }
       event::Event::Tick => {
         app.update_on_tick();
