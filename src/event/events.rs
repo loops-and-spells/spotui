@@ -1,6 +1,6 @@
 use crate::event::Key;
 use crossterm::event;
-use std::{sync::mpsc, thread, time::Duration};
+use std::{sync::{mpsc, Arc, atomic::{AtomicU64, Ordering}}, thread, time::Duration};
 
 #[derive(Debug, Clone, Copy)]
 /// Configuration for event handling.
@@ -34,6 +34,8 @@ pub struct Events {
   rx: mpsc::Receiver<Event<Key>>,
   // Need to be kept around to prevent disposing the sender side.
   _tx: mpsc::Sender<Event<Key>>,
+  // Shared tick rate that can be updated dynamically
+  tick_rate_ms: Arc<AtomicU64>,
 }
 
 impl Events {
@@ -48,12 +50,17 @@ impl Events {
   /// Constructs an new instance of `Events` from given config.
   pub fn with_config(config: EventConfig) -> Events {
     let (tx, rx) = mpsc::channel();
+    let tick_rate_ms = Arc::new(AtomicU64::new(config.tick_rate.as_millis() as u64));
+    let tick_rate_ms_clone = Arc::clone(&tick_rate_ms);
 
     let event_tx = tx.clone();
     thread::spawn(move || {
       loop {
+        // Get current tick rate
+        let current_tick_rate = Duration::from_millis(tick_rate_ms_clone.load(Ordering::Relaxed));
+        
         // poll for tick rate duration, if no event, sent tick event.
-        if event::poll(config.tick_rate).unwrap() {
+        if event::poll(current_tick_rate).unwrap() {
           if let event::Event::Key(key) = event::read().unwrap() {
             let key = Key::from(key);
 
@@ -65,12 +72,17 @@ impl Events {
       }
     });
 
-    Events { rx, _tx: tx }
+    Events { rx, _tx: tx, tick_rate_ms }
   }
 
   /// Attempts to read an event.
   /// This function will block the current thread.
   pub fn next(&self) -> Result<Event<Key>, mpsc::RecvError> {
     self.rx.recv()
+  }
+  
+  /// Update the tick rate dynamically
+  pub fn set_tick_rate(&self, tick_rate_ms: u64) {
+    self.tick_rate_ms.store(tick_rate_ms, Ordering::Relaxed);
   }
 }

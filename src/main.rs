@@ -486,6 +486,18 @@ async fn start_ui(user_config: UserConfig, app: &Arc<Mutex<App>>) -> Result<()> 
       app.dispatch(IoEvent::RefreshAuthentication);
     }
 
+    // Adjust tick rate based on current state
+    // Use faster refresh rate (60 FPS) when in idle mode or when music is playing
+    // to ensure smooth animation of the spinning record
+    let should_use_fast_tick = app.is_idle_mode || 
+      matches!(&app.current_playback_context, Some(ctx) if ctx.is_playing);
+    
+    if should_use_fast_tick {
+      events.set_tick_rate(16); // ~60 FPS for smooth animation
+    } else {
+      events.set_tick_rate(user_config.behavior.tick_rate_milliseconds);
+    }
+
     match events.next()? {
       event::Event::Input(key) => {
         // Reset idle timer on any user input

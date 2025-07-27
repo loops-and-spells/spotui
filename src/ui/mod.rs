@@ -2164,6 +2164,19 @@ pub fn draw_log_stream_full_screen(f: &mut Frame, app: &App) {
   draw_log_stream::<CrosstermBackend<std::io::Stdout>>(f, app, chunks[1]);
 }
 
+/// Darken a color by reducing its brightness
+fn darken_color(color: Color, factor: f32) -> Color {
+  match color {
+    Color::Rgb(r, g, b) => {
+      let darkened_r = (r as f32 * factor).max(0.0).min(255.0) as u8;
+      let darkened_g = (g as f32 * factor).max(0.0).min(255.0) as u8;
+      let darkened_b = (b as f32 * factor).max(0.0).min(255.0) as u8;
+      Color::Rgb(darkened_r, darkened_g, darkened_b)
+    }
+    _ => color,
+  }
+}
+
 /// Extract vibrant and dark colors from album art
 fn get_album_art_colors(art: &crate::album_art::PixelatedAlbumArt) -> (Color, Color) {
   let mut darkest_color = art.pixels[0][0].to_ratatui_color();
@@ -2483,9 +2496,12 @@ fn draw_fullscreen_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) -> (C
     // Get dynamic colors from the album art
     let (vibrant_color, darkest_color) = get_album_art_colors(art);
     
-    // Fill the entire background with the darkest color
+    // Make the background one shade darker than the picked color for better visual separation
+    let darker_background = darken_color(darkest_color, 0.7); // 70% brightness
+    
+    // Fill the entire background with the darker color
     let background = Block::default()
-      .style(Style::default().bg(darkest_color));
+      .style(Style::default().bg(darker_background));
     f.render_widget(background, layout_chunk);
     
     // Calculate the maximum size we can display
@@ -2502,8 +2518,8 @@ fn draw_fullscreen_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) -> (C
     let scale_factor = display_size as f32 / art.width as f32;
     
     // Center the art in the available space (accounting for shadow)
-    let total_width = (display_size as u16 + 1) * 2; // +1 for shadow on right
-    let total_height = display_size as u16 + 1; // +1 for shadow on bottom
+    let total_width = (display_size as u16 + 2) * 2; // +2 for shadow offset
+    let total_height = display_size as u16 + 2; // +2 for shadow offset
     let x_offset = (layout_chunk.width.saturating_sub(total_width)) / 2;
     let y_offset = (layout_chunk.height.saturating_sub(total_height)) / 2;
     
@@ -2511,72 +2527,41 @@ fn draw_fullscreen_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) -> (C
     let inset_x_offset = x_offset;
     let inset_y_offset = y_offset;
     
-    // Draw drop shadow - only on right and bottom edges
-    // Right edge shadow
-    for y in 0..display_size {
-      let y_pos = layout_chunk.y + inset_y_offset + y as u16;
-      if y_pos >= layout_chunk.y + layout_chunk.height {
-        break;
-      }
-      
-      let x_pos = layout_chunk.x + inset_x_offset + (display_size as u16 * 2);
-      if x_pos + 2 <= layout_chunk.x + layout_chunk.width {
-        let pixel = Span::styled("██", Style::default().fg(Color::Black));
-        let paragraph = Paragraph::new(pixel);
-        let pixel_area = Rect {
-          x: x_pos,
-          y: y_pos,
-          width: 2,
-          height: 1,
-        };
-        f.render_widget(paragraph, pixel_area);
-      }
-    }
+    // Get rotation angle based on real-time for smooth animation - always spinning
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    let time_ms = now.as_millis();
     
-    // Bottom edge shadow
-    let y_pos = layout_chunk.y + inset_y_offset + display_size as u16;
-    if y_pos < layout_chunk.y + layout_chunk.height {
-      for x in 0..=display_size {
-        let x_pos = layout_chunk.x + inset_x_offset + (x as u16 * 2);
-        if x_pos + 2 > layout_chunk.x + layout_chunk.width {
-          break;
-        }
-        
-        let pixel = Span::styled("██", Style::default().fg(Color::Black));
-        let paragraph = Paragraph::new(pixel);
-        let pixel_area = Rect {
-          x: x_pos,
-          y: y_pos,
-          width: 2,
-          height: 1,
-        };
-        f.render_widget(paragraph, pixel_area);
-      }
-    }
+    // Fast rotation for visual effect - 1 rotation per 3 seconds (20 RPM)
+    // Use modulo to keep the value manageable
+    let rotation_phase = (time_ms % 3000) as f32 / 3000.0;
+    let rotation_angle = rotation_phase * 2.0 * std::f32::consts::PI;
     
-    // Re-render the album art on top (inset)
+    // Calculate center point
+    let center_x = display_size as f32 / 2.0;
+    let center_y = display_size as f32 / 2.0;
+    let radius = display_size as f32 / 2.0;
+    
+    // Draw circular drop shadow first (offset by 2 pixels right and down)
     for y in 0..display_size {
-      let y_pos = layout_chunk.y + inset_y_offset + y as u16;
+      let y_pos = layout_chunk.y + inset_y_offset + y as u16 + 2;
       if y_pos >= layout_chunk.y + layout_chunk.height {
         break;
       }
       
       for x in 0..display_size {
-        let x_pos = layout_chunk.x + inset_x_offset + (x as u16 * 2);
+        let x_pos = layout_chunk.x + inset_x_offset + (x as u16 * 2) + 4;
         if x_pos + 2 > layout_chunk.x + layout_chunk.width {
           break;
         }
         
-        // Map display coordinates back to original art coordinates
-        let src_x = (x as f32 / scale_factor) as usize;
-        let src_y = (y as f32 / scale_factor) as usize;
+        // Check if pixel is within circle
+        let dx = x as f32 - center_x;
+        let dy = y as f32 - center_y;
+        let distance = (dx * dx + dy * dy).sqrt();
         
-        // Get the pixel color from the original art
-        if src_y < art.pixels.len() && src_x < art.pixels[src_y].len() {
-          let color = art.pixels[src_y][src_x].to_ratatui_color();
-          
-          // Render double-width block
-          let pixel = Span::styled("██", Style::default().fg(color));
+        if distance <= radius {
+          let pixel = Span::styled("██", Style::default().fg(Color::Black));
           let paragraph = Paragraph::new(pixel);
           let pixel_area = Rect {
             x: x_pos,
@@ -2589,121 +2574,93 @@ fn draw_fullscreen_album_art(f: &mut Frame, app: &App, layout_chunk: Rect) -> (C
       }
     }
     
-    // Now add fade/blur effect around the edges
-    let fade_width = 20; // Number of columns to fade on each side
-    
-    // Extract background RGB values
-    let (bg_r, bg_g, bg_b) = match darkest_color {
-      Color::Rgb(r, g, b) => (r, g, b),
-      _ => (0, 0, 0),
-    };
-    
-    // Sample edge colors from the art for blending
-    let left_edge_y = display_size / 2;
-    let right_edge_y = display_size / 2;
-    
-    let (left_edge_r, left_edge_g, left_edge_b) = if (left_edge_y as usize) < art.pixels.len() && 0 < art.pixels[left_edge_y as usize].len() {
-      match art.pixels[left_edge_y as usize][0].to_ratatui_color() {
-        Color::Rgb(r, g, b) => (r, g, b),
-        _ => (bg_r, bg_g, bg_b),
-      }
-    } else {
-      (bg_r, bg_g, bg_b)
-    };
-    
-    let right_edge_x = (display_size - 1) as f32 / scale_factor;
-    let (right_edge_r, right_edge_g, right_edge_b) = if (right_edge_y as usize) < art.pixels.len() && (right_edge_x as usize) < art.pixels[right_edge_y as usize].len() {
-      match art.pixels[right_edge_y as usize][right_edge_x as usize].to_ratatui_color() {
-        Color::Rgb(r, g, b) => (r, g, b),
-        _ => (bg_r, bg_g, bg_b),
-      }
-    } else {
-      (bg_r, bg_g, bg_b)
-    };
-    
-    // Draw left fade with blur effect
+    // Draw the circular album art with rotation
     for y in 0..display_size {
       let y_pos = layout_chunk.y + inset_y_offset + y as u16;
       if y_pos >= layout_chunk.y + layout_chunk.height {
         break;
       }
       
-      // Sample color from this row's left edge
-      let src_y = (y as f32 / scale_factor) as usize;
-      let (edge_r, edge_g, edge_b) = if src_y < art.pixels.len() && 0 < art.pixels[src_y].len() {
-        match art.pixels[src_y][0].to_ratatui_color() {
-          Color::Rgb(r, g, b) => (r, g, b),
-          _ => (left_edge_r, left_edge_g, left_edge_b),
-        }
-      } else {
-        (left_edge_r, left_edge_g, left_edge_b)
-      };
-      
-      for fade_x in 0..fade_width {
-        let x_pos = layout_chunk.x + inset_x_offset.saturating_sub(fade_x as u16 * 2 + 2);
-        if x_pos < layout_chunk.x {
-          continue;
-        }
-        
-        // Calculate fade alpha
-        let fade_alpha = (fade_x as f32 / fade_width as f32).powf(1.5);
-        
-        // Blend from edge color to background
-        let blended_r = (edge_r as f32 * (1.0 - fade_alpha) + bg_r as f32 * fade_alpha) as u8;
-        let blended_g = (edge_g as f32 * (1.0 - fade_alpha) + bg_g as f32 * fade_alpha) as u8;
-        let blended_b = (edge_b as f32 * (1.0 - fade_alpha) + bg_b as f32 * fade_alpha) as u8;
-        
-        let gradient_color = Color::Rgb(blended_r, blended_g, blended_b);
-        
-        let pixel = Span::styled("██", Style::default().fg(gradient_color));
-        let paragraph = Paragraph::new(pixel);
-        let pixel_area = Rect {
-          x: x_pos,
-          y: y_pos,
-          width: 2,
-          height: 1,
-        };
-        f.render_widget(paragraph, pixel_area);
-      }
-      
-      // Right fade with blur effect
-      let src_x = ((display_size - 1) as f32 / scale_factor) as usize;
-      let (edge_r, edge_g, edge_b) = if src_y < art.pixels.len() && src_x < art.pixels[src_y].len() {
-        match art.pixels[src_y][src_x].to_ratatui_color() {
-          Color::Rgb(r, g, b) => (r, g, b),
-          _ => (right_edge_r, right_edge_g, right_edge_b),
-        }
-      } else {
-        (right_edge_r, right_edge_g, right_edge_b)
-      };
-      
-      for fade_x in 0..fade_width {
-        let x_pos = layout_chunk.x + inset_x_offset + (display_size as u16 * 2) + (fade_x as u16 * 2);
+      for x in 0..display_size {
+        let x_pos = layout_chunk.x + inset_x_offset + (x as u16 * 2);
         if x_pos + 2 > layout_chunk.x + layout_chunk.width {
           break;
         }
         
-        // Calculate fade alpha
-        let fade_alpha = (fade_x as f32 / fade_width as f32).powf(1.5);
+        // Check if pixel is within circle
+        let dx = x as f32 - center_x;
+        let dy = y as f32 - center_y;
+        let distance = (dx * dx + dy * dy).sqrt();
         
-        // Blend from edge color to background
-        let blended_r = (edge_r as f32 * (1.0 - fade_alpha) + bg_r as f32 * fade_alpha) as u8;
-        let blended_g = (edge_g as f32 * (1.0 - fade_alpha) + bg_g as f32 * fade_alpha) as u8;
-        let blended_b = (edge_b as f32 * (1.0 - fade_alpha) + bg_b as f32 * fade_alpha) as u8;
-        
-        let gradient_color = Color::Rgb(blended_r, blended_g, blended_b);
-        
-        let pixel = Span::styled("██", Style::default().fg(gradient_color));
-        let paragraph = Paragraph::new(pixel);
-        let pixel_area = Rect {
-          x: x_pos,
-          y: y_pos,
-          width: 2,
-          height: 1,
-        };
-        f.render_widget(paragraph, pixel_area);
+        if distance <= radius {
+          // Apply rotation transformation (inverse rotation to find source pixel)
+          let cos_angle = rotation_angle.cos();
+          let sin_angle = rotation_angle.sin();
+          
+          // Apply inverse rotation to find which pixel from the source should be here
+          let rotated_dx = cos_angle * dx - sin_angle * dy;
+          let rotated_dy = sin_angle * dx + cos_angle * dy;
+          
+          // Map rotated coordinates back to source image
+          let src_x = ((rotated_dx + center_x) / scale_factor) as i32;
+          let src_y = ((rotated_dy + center_y) / scale_factor) as i32;
+          
+          // Get the pixel color from the original art
+          if src_x >= 0 && src_y >= 0 && (src_y as usize) < art.pixels.len() && (src_x as usize) < art.pixels[src_y as usize].len() {
+            let mut color = art.pixels[src_y as usize][src_x as usize].to_ratatui_color();
+            
+            // Add center hole
+            if distance < radius * 0.15 {
+              color = darkest_color;
+            }
+            
+            // Add label area (lighter circle in center)
+            if distance < radius * 0.4 && distance > radius * 0.15 {
+              color = match (color, vibrant_color) {
+                (Color::Rgb(r, g, b), Color::Rgb(vr, vg, vb)) => Color::Rgb(
+                  ((r as f32 * 0.7 + vr as f32 * 0.3)) as u8,
+                  ((g as f32 * 0.7 + vg as f32 * 0.3)) as u8,
+                  ((b as f32 * 0.7 + vb as f32 * 0.3)) as u8,
+                ),
+                _ => color,
+              };
+            }
+            
+            // Add a visual mark to show rotation (a line from center to edge)
+            let angle_to_point = dy.atan2(dx);
+            // Create a thick line by checking angle difference
+            let angle_diff = ((angle_to_point - rotation_angle + std::f32::consts::PI) % (2.0 * std::f32::consts::PI)) - std::f32::consts::PI;
+            if angle_diff.abs() < 0.1 && distance > radius * 0.4 {
+              color = Color::Red; // Red mark for visibility
+            }
+            
+            // Render the pixel
+            let pixel = Span::styled("██", Style::default().fg(color));
+            let paragraph = Paragraph::new(pixel);
+            let pixel_area = Rect {
+              x: x_pos,
+              y: y_pos,
+              width: 2,
+              height: 1,
+            };
+            f.render_widget(paragraph, pixel_area);
+          } else {
+            // Fill with darker background color if outside source image
+            let pixel = Span::styled("██", Style::default().fg(darker_background));
+            let paragraph = Paragraph::new(pixel);
+            let pixel_area = Rect {
+              x: x_pos,
+              y: y_pos,
+              width: 2,
+              height: 1,
+            };
+            f.render_widget(paragraph, pixel_area);
+          }
+        }
       }
     }
+    
+    // Removed blur effect - album art now has clean edges
     
     // Return the colors for progress bar theming
     (vibrant_color, darkest_color)
